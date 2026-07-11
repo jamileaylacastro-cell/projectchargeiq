@@ -1,8 +1,11 @@
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pydeck as pdk
-from datetime import datetime, timedelta
 
 st.set_page_config(page_title="EVOxCharge Analytics", page_icon="⚡",
                    layout="wide", initial_sidebar_state="expanded")
@@ -30,17 +33,64 @@ section[data-testid="stSidebar"] h3{color:#FFFFFF!important}
 </style>
 """, unsafe_allow_html=True)
 
+def resolve_data_file(filename):
+    if not filename:
+        return None
+
+    input_path = Path(str(filename))
+    candidates = []
+
+    if input_path.is_absolute():
+        candidates.append(input_path)
+    else:
+        candidates.extend([
+            input_path,
+            Path.cwd() / input_path,
+            Path(__file__).resolve().parent / input_path,
+            Path("/mnt/user-data/uploads") / input_path,
+            Path("/mount/src/evox_project") / input_path,
+            Path("/workspace") / input_path,
+        ])
+
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            return candidate.resolve()
+
+    basename = input_path.name
+    for base_dir in [Path.cwd(), Path(__file__).resolve().parent, Path("/mnt/user-data/uploads"), Path("/mount/src/evox_project"), Path("/workspace")]:
+        candidate = base_dir / basename
+        if candidate.exists():
+            return candidate.resolve()
+
+    return None
+
+
+def load_excel_file(filename, sheet_name=0):
+    resolved_path = resolve_data_file(filename)
+    if resolved_path is None:
+        raise FileNotFoundError(
+            f"Could not find data file '{filename}'. Place the Excel file in the project folder or update the path."
+        )
+    try:
+        return pd.read_excel(resolved_path, sheet_name=sheet_name)
+    except ValueError:
+        return pd.read_excel(resolved_path, sheet_name=0)
+
+
 # ── LOAD ALL DATA ──────────────────────────────────────────────────────────
 @st.cache_data
 def load_all():
-    tx = pd.read_excel("/mnt/user-data/uploads/transactions.xlsx",
-                       sheet_name="transactions.csv")
-    cp = pd.read_excel("/mnt/user-data/uploads/Charge_Point_Information__Connector_Type__Charger_Type__Capacity__Fees_Rates_.xlsx")
-    sp = pd.read_excel("/mnt/user-data/uploads/Station_Profile.xlsx")
-    ud = pd.read_excel("/mnt/user-data/uploads/UserDetails.xlsx")
-    wt = pd.read_excel("/mnt/user-data/uploads/walletTransactions.xlsx")
-    fin = pd.read_excel("/mnt/user-data/uploads/EVOxCharge_Financials_-_AIM_MAIDA.xlsx",
-                        sheet_name=None)
+    tx = load_excel_file("transactions.xlsx", sheet_name=0)
+    cp = load_excel_file("Charge_Point_Information__Connector_Type__Charger_Type__Capacity__Fees_Rates_.xlsx", sheet_name=0)
+    sp = load_excel_file("Station_Profile.xlsx", sheet_name=0)
+    ud = load_excel_file("UserDetails.xlsx", sheet_name=0)
+    wt = load_excel_file("walletTransactions.xlsx", sheet_name=0)
+    fin = load_excel_file("EVOxCharge_Financials_-_AIM_MAIDA.xlsx", sheet_name=None)
 
     # Clean transactions
     tx["STARTTIME"] = pd.to_datetime(tx["STARTTIME"], errors="coerce")
@@ -98,7 +148,12 @@ def load_all():
 
     return tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees
 
-tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df = load_all()
+try:
+    tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df = load_all()
+except FileNotFoundError as exc:
+    st.error(str(exc))
+    st.info("Place the required Excel files in the project folder or upload them to the same directory as this app.")
+    st.stop()
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -520,7 +575,7 @@ if is_company and len(fin_overall):
 # ── USER INSIGHTS ────────────────────────────────────────────────────────────
 if is_company:
     st.markdown("<div class='sec-hdr'>👤 User Insights</div>", unsafe_allow_html=True)
-    ud_clean = pd.read_excel("/mnt/user-data/uploads/UserDetails.xlsx")
+    ud_clean = load_excel_file("UserDetails.xlsx", sheet_name=0)
 
     u1,u2,u3,u4 = st.columns(4)
     active = len(ud_clean[ud_clean["ACCOUNT_STATUS"]=="Active"])
