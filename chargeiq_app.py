@@ -34,36 +34,69 @@ section[data-testid="stSidebar"] h3{color:#BEFF6C!important}
   padding:10px 14px;font-family:monospace;font-size:11px;
   color:#000000;white-space:pre-line;line-height:1.7}
 
-/* ── Kill Streamlit's default red accents everywhere ─────────────────── */
+/* ── Kill Streamlit's default red accents; guarantee readable text on
+     every light/lime background, even inside the black sidebar ──────── */
+
+/* Multiselect selected pills — lime bg, black text, everywhere */
 span[data-baseweb="tag"], div[data-baseweb="tag"]{
-  background-color:#BEFF6C!important; color:#000000!important;
-  border-color:#000000!important;
+  background-color:#BEFF6C!important; border-color:#000000!important;
 }
+span[data-baseweb="tag"] *, div[data-baseweb="tag"] *{ color:#000000!important; }
 span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg{ fill:#000000!important; }
-div[data-baseweb="select"] > div{ border-color:#EAE0D0!important; background:#fff!important; }
+
+/* Select / multiselect closed box — white bg, black text */
+div[data-baseweb="select"] > div{
+  border-color:#EAE0D0!important; background:#FFFFFF!important;
+}
+div[data-baseweb="select"] > div *{ color:#000000!important; }
 div[data-baseweb="select"]:focus-within > div{
   border-color:#BEFF6C!important; box-shadow:0 0 0 1px #BEFF6C!important;
+  background:#FFFFFF!important;
 }
-div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover{
-  background-color:#FFF4EC!important;
+
+/* Dropdown option list — white bg by default, lime on hover/selected,
+   text always black regardless of sidebar's cream override */
+div[data-baseweb="popover"], div[data-baseweb="menu"]{ background:#FFFFFF!important; }
+div[data-baseweb="popover"] *, div[data-baseweb="menu"] *{ color:#000000!important; }
+div[data-baseweb="popover"] li, div[data-baseweb="menu"] li{ background:#FFFFFF!important; }
+div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
+div[data-baseweb="popover"] li[aria-selected="true"],
+div[data-baseweb="menu"] li[aria-selected="true"]{
+  background-color:#BEFF6C!important;
 }
-div[role="radiogroup"] label div:first-child{ border-color:#000000!important; }
-div[role="radiogroup"] label div:first-child > div{ background-color:#000000!important; }
+div[data-baseweb="popover"] li:hover *, div[data-baseweb="menu"] li:hover *,
+div[data-baseweb="popover"] li[aria-selected="true"] *,
+div[data-baseweb="menu"] li[aria-selected="true"] *{ color:#000000!important; }
+
+/* Radio buttons */
+div[role="radiogroup"] label div:first-child{ border-color:#BEFF6C!important; }
+div[role="radiogroup"] label div:first-child > div{ background-color:#BEFF6C!important; }
 input[type="checkbox"], input[type="radio"]{ accent-color:#BEFF6C!important; }
+
+/* Slider */
 div[data-testid="stSlider"] div[role="slider"]{
   background-color:#000000!important; border-color:#000000!important;
 }
 div[data-testid="stSlider"] > div > div > div{ background-color:#BEFF6C!important; }
-div[data-testid="stCheckbox"] label div[data-testid="stMarkdownContainer"]{ color:inherit!important; }
-button[kind="primary"]{ background-color:#000000!important; color:#BEFF6C!important; border-color:#000000!important; }
-button[kind="secondary"]{ border-color:#000000!important; color:#000000!important; }
+
+/* Buttons */
+button[kind="primary"]{ background-color:#BEFF6C!important; color:#000000!important; border-color:#000000!important; }
+button[kind="secondary"]{ border-color:#000000!important; color:#000000!important; background:#FFFFFF!important; }
+
+/* File uploader — light bg, so force black text regardless of container */
 div[data-testid="stFileUploader"] section{
-  background:#FFF4EC!important; border:1px dashed #000000!important;
+  background:#FFFFFF!important; border:1px dashed #000000!important;
+}
+div[data-testid="stFileUploader"] section *{ color:#000000!important; }
+div[data-testid="stFileUploader"] section small{ color:#5C574D!important; }
+div[data-testid="stFileUploaderDropzoneInstructions"] *{ color:#000000!important; }
+div[data-testid="stFileUploader"] button{
+  background:#BEFF6C!important; color:#000000!important; border-color:#000000!important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA SOURCE: uploaded files OR files beside this script ────────────────
+# ── DATA SOURCE CONFIG ──────────────────────────────────────────────────────
 BASE = Path(__file__).parent
 
 FILE_LABELS = {
@@ -89,43 +122,79 @@ def disk_path(filename):
             return candidate
     return None
 
-with st.sidebar:
-    st.markdown("## ⚡ Project ChargeIQ")
+bundled_status = {key: disk_path(fname) is not None for key, fname in FILE_DEFAULTS.items()}
+all_bundled = all(bundled_status.values())
+
+if "chargeiq_data_ready" not in st.session_state:
+    st.session_state.chargeiq_data_ready = False
+if "chargeiq_file_bytes" not in st.session_state:
+    st.session_state.chargeiq_file_bytes = {}
+
+# ── DATA GATE — request files before the dashboard ever loads ──────────────
+if not st.session_state.chargeiq_data_ready:
+    col_ico, col_ttl = st.columns([1, 10])
+    with col_ico:
+        st.markdown("<div style='background:#BEFF6C;border-radius:8px;padding:8px 10px;"
+                    "font-size:22px;text-align:center;margin-top:6px'>⚡</div>",
+                    unsafe_allow_html=True)
+    with col_ttl:
+        st.markdown("<h2 style='margin:0;color:#000000'>Project ChargeIQ</h2>"
+                    "<p style='margin:0;color:#5C574D;font-size:12px'>"
+                    "Provide your data to begin — upload files below or use the bundled dataset.</p>",
+                    unsafe_allow_html=True)
     st.markdown("---")
-    with st.expander("📤 Upload data (optional)", expanded=False):
-        st.caption("Upload your own Excel exports here, or leave blank to use "
-                   "the files already bundled with the app.")
-        uploaded = {}
-        for key, label in FILE_LABELS.items():
-            uploaded[key] = st.file_uploader(label, type=["xlsx"], key=f"up_{key}")
 
-# Resolve each source: uploaded file takes priority over the bundled file
-file_bytes = {}
-missing = []
-for key, fname in FILE_DEFAULTS.items():
-    up = uploaded.get(key)
-    if up is not None:
-        file_bytes[key] = up.getvalue()
+    if all_bundled:
+        st.success("✅ Bundled dataset found alongside the app. You can start immediately, "
+                   "or upload replacements for any file below before starting.")
     else:
-        p = disk_path(fname)
-        if p is not None:
-            file_bytes[key] = p.read_bytes()
+        found = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if v]
+        need  = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if not v]
+        if found:
+            st.info(f"Found {len(found)}/6 bundled files. Upload the remaining {len(need)} to continue.")
         else:
-            file_bytes[key] = None
-            missing.append(fname)
+            st.warning("No bundled data found. Upload all 6 files below to continue.")
 
-# ── MISSING FILE GUARD ──────────────────────────────────────────────────────
-if missing:
-    st.error("❌ Missing data files. Upload them using **📤 Upload data** in the "
-             "sidebar, or place these in the same folder as `chargeiq_app.py` "
-             "(or in a `/data` subfolder):")
-    for f in missing:
-        st.markdown(f"- `{f}`")
-    st.info("📁 If bundling locally, your folder should look like:\n```\n"
-           "chargeiq_app.py\nrequirements.txt\ntransactions.xlsx\nUserDetails.xlsx\n"
-           "walletTransactions.xlsx\nStation_Profile.xlsx\n"
-           "Charge_Point_Information_...xlsx\nProjectChargeIQ_Financials.xlsx\n```")
+    st.markdown("<div class='sec-hdr'>Upload data files</div>", unsafe_allow_html=True)
+    up_cols = st.columns(3)
+    gate_uploaded = {}
+    for i, (key, label) in enumerate(FILE_LABELS.items()):
+        with up_cols[i % 3]:
+            status = "✅ bundled" if bundled_status[key] else "⚠️ required"
+            st.caption(f"{label} — {status}")
+            gate_uploaded[key] = st.file_uploader(label, type=["xlsx"],
+                                                  key=f"gate_up_{key}", label_visibility="collapsed")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    ready_now = all(
+        gate_uploaded.get(k) is not None or bundled_status[k]
+        for k in FILE_DEFAULTS
+    )
+
+    btn_col1, btn_col2 = st.columns([1, 4])
+    with btn_col1:
+        clicked = st.button("Load Dashboard →", type="primary", disabled=not ready_now,
+                            use_container_width=True)
+    with btn_col2:
+        if not ready_now:
+            st.caption("Upload the remaining required files to enable this button.")
+
+    if clicked:
+        resolved = {}
+        for key, fname in FILE_DEFAULTS.items():
+            up = gate_uploaded.get(key)
+            if up is not None:
+                resolved[key] = up.getvalue()
+            else:
+                p = disk_path(fname)
+                resolved[key] = p.read_bytes() if p else None
+        st.session_state.chargeiq_file_bytes = resolved
+        st.session_state.chargeiq_data_ready = True
+        st.rerun()
+
     st.stop()
+
+file_bytes = st.session_state.chargeiq_file_bytes
 
 # ── LOAD ALL DATA ──────────────────────────────────────────────────────────
 @st.cache_data
@@ -188,10 +257,17 @@ def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
 tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df = load_all(
     file_bytes["transactions"], file_bytes["charge_points"], file_bytes["station_profile"],
     file_bytes["user_details"], file_bytes["wallet_txn"], file_bytes["financials"]
+
 )
 
 # ── SIDEBAR FILTERS ──────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("## ⚡ Project ChargeIQ")
+    if st.button("🔄 Change data source", use_container_width=True):
+        st.session_state.chargeiq_data_ready = False
+        st.session_state.chargeiq_file_bytes = {}
+        st.rerun()
+    st.markdown("---")
     st.markdown("### Filters")
     view = st.radio("Dashboard View",
                     ["🏢  Company / Ops", "🏪  Host Partner Site"])
@@ -224,9 +300,11 @@ with st.sidebar:
 
     st.markdown("---")
     days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
+    n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
+    src_label = "Bundled data" if n_uploaded == 0 else f"{n_uploaded}/6 files uploaded"
     st.markdown(f"<small style='color:#FFF4EC'>Period: **{sel_month}**<br>"
                 f"Active days: **{days_in_month}**<br>"
-                f"Source: {'Uploaded files' if any(uploaded.values()) else 'Bundled data'}</small>",
+                f"Source: {src_label}</small>",
                 unsafe_allow_html=True)
 
 # ── FILTER ─────────────────────────────────────────────────────────────────
