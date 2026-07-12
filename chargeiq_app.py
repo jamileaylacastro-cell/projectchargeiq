@@ -76,11 +76,11 @@ div[data-baseweb="menu"] li[aria-selected="true"] *{ color:#000000!important; }
 /* Radio buttons — style only the native input dot, not the row wrapper */
 input[type="checkbox"], input[type="radio"]{ accent-color:#BEFF6C!important; }
 
-/* Slider */
+/* Slider — thumb only; no track/rail background override (was painting
+   a much wider box than intended, covering the min/max value labels) */
 div[data-testid="stSlider"] div[role="slider"]{
   background-color:#000000!important; border-color:#000000!important;
 }
-div[data-testid="stSlider"] > div > div > div{ background-color:#BEFF6C!important; }
 
 /* Buttons — cover the inner text node too, not just the button element,
    since Streamlit wraps button text in its own <p>/<span> that the
@@ -117,6 +117,21 @@ section[data-testid="stSidebar"] button[kind="primary"] *{ color:#000000!importa
 section[data-testid="stSidebar"] button[kind="secondary"] *{ color:#000000!important; }
 section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection{
   background:#BEFF6C!important; color:#000000!important;
+}
+
+/* ── FINAL PASS — target Streamlit's own stable widget wrappers directly.
+     These data-testid values are assigned by Streamlit itself (not the
+     BaseWeb internals, which can nest differently across versions), so
+     this is the most reliable way to guarantee black text survives on
+     every light-background widget inside the black sidebar. Placed last
+     so it also wins any same-specificity source-order tie. ─────────── */
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label,
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label{ color:#FFF4EC!important; }
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div{
+  background:#FFFFFF!important;
 }
 </style>
 """, unsafe_allow_html=True)
