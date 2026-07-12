@@ -348,14 +348,26 @@ with st.sidebar:
     # target PER STATION in Host Partner view — each station's slider
     # keeps its own remembered value (via its own widget key) when you
     # switch between sites, rather than sharing one global setting.
+    #
+    # Range and default reflect published EV charger utilization
+    # benchmarks, not an assumption of high usage: public charger
+    # utilization typically sits at 5–15%, McKinsey cites ~15% as the
+    # threshold for economic viability, and even the most mature EU
+    # markets peak around 30%. Source: Topal, O. (2025), "A comprehensive
+    # analysis of capacity utilization rates of fast-charging stations in
+    # shopping malls," Int J Low-Carbon Tech, 20, 1646–1660.
+    # https://doi.org/10.1093/ijlct/ctaf100
     if is_company:
-        target_util = st.slider("Network Target Utilization %", 50, 90, 70,
+        target_util = st.slider("Network Target Utilization %", 1, 40, 15,
                                 key="target_network")
     else:
         station_key = sel_stations[0]
         target_util = st.slider(
-            f"Target Utilization % — {station_key[:22]}", 50, 90, 70,
+            f"Target Utilization % — {station_key[:22]}", 1, 40, 15,
             key=f"target_station_{station_key}")
+    st.caption("📚 Range reflects published benchmarks: public EV chargers "
+              "typically run 5–15% utilization; ~15% is the threshold "
+              "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
 
     st.markdown("---")
     days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
@@ -587,7 +599,7 @@ for sname in sel_stations:
         ll = s_cp[["LATITUDE","LONGITUDE"]].dropna()
         if len(ll): lat, lon = ll.iloc[0]["LATITUDE"], ll.iloc[0]["LONGITUDE"]
     if pd.isna(lat): continue
-    color = [143,203,62,220] if s_util>=target_util else ([168,113,10,210] if s_util>=target_util-10 else [193,68,62,220])
+    color = [143,203,62,220] if s_util>=target_util else ([168,113,10,210] if s_util>=target_util*0.7 else [193,68,62,220])
     station_rows.append({
         "STATIONNAME": sname, "LATITUDE": lat, "LONGITUDE": lon,
         "util_pct": s_util, "energy_kwh": round(s_kwh,1),
@@ -670,7 +682,7 @@ if is_company:
             st.markdown(f"**Utilization by Station vs {target_util}% target**{title_suffix}")
             for _, r in map_df.sort_values("util_pct", ascending=False).head(10).iterrows():
                 u = r["util_pct"]; g = u - target_util
-                bc = "#BEFF6C" if u>=target_util else ("#A8710A" if u>=target_util-10 else "#C1443E")
+                bc = "#BEFF6C" if u>=target_util else ("#A8710A" if u>=target_util*0.7 else "#C1443E")
                 gc = "#4F7A1E" if g>=0 else "#C1443E"
                 st.markdown(
                     f"<div style='margin-bottom:9px'>"
@@ -711,8 +723,8 @@ if len(map_df):
     tbl["gap_pp"] = (tbl["util_pct"] - target_util).round(1)
     tbl["action"] = tbl["util_pct"].apply(
         lambda u: "✅ Expand" if u>=target_util
-        else ("🟡 Monitor" if u>=target_util-10
-        else ("⚠️ Optimize" if u>=target_util-25 else "🔴 Review")))
+        else ("🟡 Monitor" if u>=target_util*0.7
+        else ("⚠️ Optimize" if u>=target_util*0.4 else "🔴 Review")))
     tbl = tbl.rename(columns={
         "STATIONNAME":"Station","util_pct":"Util %","energy_kwh":"kWh Actual",
         "avail_kwh":"kWh Available","sessions":"Sessions",
