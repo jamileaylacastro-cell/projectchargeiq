@@ -68,9 +68,7 @@ div[data-baseweb="popover"] li:hover *, div[data-baseweb="menu"] li:hover *,
 div[data-baseweb="popover"] li[aria-selected="true"] *,
 div[data-baseweb="menu"] li[aria-selected="true"] *{ color:#000000!important; }
 
-/* Radio buttons */
-div[role="radiogroup"] label div:first-child{ border-color:#BEFF6C!important; }
-div[role="radiogroup"] label div:first-child > div{ background-color:#BEFF6C!important; }
+/* Radio buttons — style only the native input dot, not the row wrapper */
 input[type="checkbox"], input[type="radio"]{ accent-color:#BEFF6C!important; }
 
 /* Slider */
@@ -93,6 +91,19 @@ div[data-testid="stFileUploaderDropzoneInstructions"] *{ color:#000000!important
 div[data-testid="stFileUploader"] button{
   background:#BEFF6C!important; color:#000000!important; border-color:#000000!important;
 }
+
+/* ── Sidebar-scoped overrides — higher specificity than the blanket
+     cream-text rule above, so anything sitting on a light/white
+     background inside the black sidebar still reads in black ────────── */
+section[data-testid="stSidebar"] div[data-baseweb="select"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] input{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-baseweb="popover"] *,
+section[data-testid="stSidebar"] div[data-baseweb="menu"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section *{ color:#000000!important; }
+section[data-testid="stSidebar"] button[kind="primary"]{ color:#000000!important; }
+section[data-testid="stSidebar"] button[kind="secondary"]{ color:#000000!important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,8 +145,7 @@ if "chargeiq_file_bytes" not in st.session_state:
 if not st.session_state.chargeiq_data_ready:
     col_ico, col_ttl = st.columns([1, 10])
     with col_ico:
-        st.markdown("<div style='background:#BEFF6C;border-radius:8px;padding:8px 10px;"
-                    "font-size:22px;text-align:center;margin-top:6px'>⚡</div>",
+        st.markdown("<div style='font-size:34px;text-align:center;margin-top:2px'>⚡</div>",
                     unsafe_allow_html=True)
     with col_ttl:
         st.markdown("<h2 style='margin:0;color:#000000'>Project ChargeIQ</h2>"
@@ -388,8 +398,7 @@ avg_wallet = ud["WALLET_BALANCE"].mean() if "WALLET_BALANCE" in ud.columns else 
 # ── HEADER ──────────────────────────────────────────────────────────────────
 col_ico, col_ttl = st.columns([1, 12])
 with col_ico:
-    st.markdown("<div style='background:#BEFF6C;border-radius:8px;padding:8px 10px;"
-                "font-size:22px;text-align:center;margin-top:6px'>⚡</div>",
+    st.markdown("<div style='font-size:34px;text-align:center;margin-top:2px'>⚡</div>",
                 unsafe_allow_html=True)
 with col_ttl:
     title = "Network Dashboard" if is_company else f"Site Dashboard — {sel_stations[0]}"
@@ -594,10 +603,12 @@ if is_company:
                 l1.markdown("🟩 ≥ Target"); l2.markdown("🟧 Near target"); l3.markdown("🟥 Below target")
 
         with bar_col:
-            st.markdown(f"**Utilization by Station vs {target_util}% target**")
-            for _, r in map_df.sort_values("util_pct", ascending=False).iterrows():
+            n_total = len(map_df)
+            title_suffix = f" (Top 10 of {n_total})" if n_total > 10 else ""
+            st.markdown(f"**Utilization by Station vs {target_util}% target**{title_suffix}")
+            for _, r in map_df.sort_values("util_pct", ascending=False).head(10).iterrows():
                 u = r["util_pct"]; g = u - target_util
-                bc = "#8FCB3E" if u>=target_util else ("#A8710A" if u>=target_util-10 else "#C1443E")
+                bc = "#BEFF6C" if u>=target_util else ("#A8710A" if u>=target_util-10 else "#C1443E")
                 gc = "#4F7A1E" if g>=0 else "#C1443E"
                 st.markdown(
                     f"<div style='margin-bottom:9px'>"
@@ -623,7 +634,7 @@ with c2:
     st.markdown("**Energy (kWh) by Charge Type**")
     ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
     ct.columns = ["Charge Type","kWh"]
-    if len(ct): st.bar_chart(ct.set_index("Charge Type"), color="#8FCB3E", height=200)
+    if len(ct): st.bar_chart(ct.set_index("Charge Type"), color="#BEFF6C", height=200)
 with c3:
     st.markdown("**Payment Method Mix**")
     pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
@@ -673,7 +684,7 @@ if is_company:
         if "PLUG_TYPE" in ud.columns:
             plugs = ud["PLUG_TYPE"].value_counts().reset_index()
             plugs.columns = ["Plug Type","Users"]
-            st.bar_chart(plugs.set_index("Plug Type"), color="#8FCB3E", height=200)
+            st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
 
 # ── HOST PARTNER CONNECTOR DETAIL ────────────────────────────────────────────
 if not is_company:
