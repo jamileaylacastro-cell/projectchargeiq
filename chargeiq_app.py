@@ -44,15 +44,20 @@ span[data-baseweb="tag"], div[data-baseweb="tag"]{
 span[data-baseweb="tag"] *, div[data-baseweb="tag"] *{ color:#000000!important; }
 span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg{ fill:#000000!important; }
 
-/* Select / multiselect closed box — white bg, black text */
+/* Select / multiselect closed box — white bg, black text, no red focus ring */
 div[data-baseweb="select"] > div{
   border-color:#EAE0D0!important; background:#FFFFFF!important;
+  outline:none!important;
 }
 div[data-baseweb="select"] > div *{ color:#000000!important; }
-div[data-baseweb="select"]:focus-within > div{
+div[data-baseweb="select"]:focus-within > div,
+div[data-baseweb="select"] > div:focus,
+div[data-baseweb="select"] > div:focus-within{
   border-color:#BEFF6C!important; box-shadow:0 0 0 1px #BEFF6C!important;
-  background:#FFFFFF!important;
+  background:#FFFFFF!important; outline:none!important;
 }
+div[data-baseweb="select"] input{ outline:none!important; box-shadow:none!important; }
+div[data-baseweb="select"] input::selection{ background:#BEFF6C!important; color:#000000!important; }
 
 /* Dropdown option list — white bg by default, lime on hover/selected,
    text always black regardless of sidebar's cream override */
@@ -77,9 +82,14 @@ div[data-testid="stSlider"] div[role="slider"]{
 }
 div[data-testid="stSlider"] > div > div > div{ background-color:#BEFF6C!important; }
 
-/* Buttons */
-button[kind="primary"]{ background-color:#BEFF6C!important; color:#000000!important; border-color:#000000!important; }
-button[kind="secondary"]{ border-color:#000000!important; color:#000000!important; background:#FFFFFF!important; }
+/* Buttons — cover the inner text node too, not just the button element,
+   since Streamlit wraps button text in its own <p>/<span> that the
+   sidebar's blanket cream-text rule matches directly and wins by
+   default inheritance rules unless explicitly overridden here */
+button[kind="primary"]{ background-color:#BEFF6C!important; border-color:#000000!important; }
+button[kind="primary"] *{ color:#000000!important; }
+button[kind="secondary"]{ border-color:#000000!important; background:#FFFFFF!important; }
+button[kind="secondary"] *{ color:#000000!important; }
 
 /* File uploader — light bg, so force black text regardless of container */
 div[data-testid="stFileUploader"] section{
@@ -91,6 +101,7 @@ div[data-testid="stFileUploaderDropzoneInstructions"] *{ color:#000000!important
 div[data-testid="stFileUploader"] button{
   background:#BEFF6C!important; color:#000000!important; border-color:#000000!important;
 }
+div[data-testid="stFileUploader"] button *{ color:#000000!important; }
 
 /* ── Sidebar-scoped overrides — higher specificity than the blanket
      cream-text rule above, so anything sitting on a light/white
@@ -102,8 +113,11 @@ section[data-testid="stSidebar"] div[data-baseweb="menu"] *{ color:#000000!impor
 section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
 section[data-testid="stSidebar"] div[data-baseweb="tag"] *{ color:#000000!important; }
 section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section *{ color:#000000!important; }
-section[data-testid="stSidebar"] button[kind="primary"]{ color:#000000!important; }
-section[data-testid="stSidebar"] button[kind="secondary"]{ color:#000000!important; }
+section[data-testid="stSidebar"] button[kind="primary"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] button[kind="secondary"] *{ color:#000000!important; }
+section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection{
+  background:#BEFF6C!important; color:#000000!important;
+}
 </style>
 """, unsafe_allow_html=True)
 
