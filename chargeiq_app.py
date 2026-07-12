@@ -266,17 +266,25 @@ def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
     tx.loc[missing_ll, "LATITUDE"]  = tx_miss["LATITUDE"].values
     tx.loc[missing_ll, "LONGITUDE"] = tx_miss["LONGITUDE"].values
 
-    cp_cap = cp.groupby("CHARGER_ID").agg(
-        CAPACITY_KW=("CAPACITY_KW","first"),
-        CHARGER_TYPE=("CHARGER_TYPE","first"),
-        PLUG_TYPE=("PLUG_TYPE","first"),
-        STATIONNAME=("STATIONNAME","first"),
-        CHARGER_ACTIVE=("CHARGER_ACTIVE","first"),
-        NETWORK_STATUS=("NETWORK_STATUS","first"),
-        CONNECTOR_STATUS=("CONNECTOR_STATUS","first"),
-        LATITUDE=("LATITUDE","first"),
-        LONGITUDE=("LONGITUDE","first"),
-    ).reset_index()
+    # ── Charge Point Info is stored at the CONNECTOR level, not one row
+    #    per charger — a single CHARGER_ID can have 2, 4, 6, or 8 rows
+    #    (one per physical plug). Grouping by CHARGER_ID and taking the
+    #    first row (the old approach) silently discarded real connectors
+    #    and could pick an incomplete row over a complete sibling row.
+    #
+    #    "Total chargepoints" = rows with a real PLUG_TYPE and
+    #    CAPACITY_KW > 0 (regardless of online/offline, so offline counts
+    #    can still be reported).
+    #    "Available capacity" (the utilization denominator) = the subset
+    #    of those that are also NETWORK_STATUS == 'Online', since an
+    #    offline connector contributes no real capacity for the period.
+    cp_cap = cp[
+        cp["PLUG_TYPE"].notna() &
+        (cp["PLUG_TYPE"].astype(str).str.strip() != "") &
+        cp["CAPACITY_KW"].notna() &
+        (cp["CAPACITY_KW"] > 0)
+    ].copy()
+    cp_excluded_count = len(cp) - len(cp_cap)
 
     fin_overall = fin["OVERALL"].dropna(subset=["CPO"]).copy()
     fin_overall.columns = ["CPO","Revenue","ActualElecCost","EstElecCost",
@@ -291,9 +299,9 @@ def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
     fees = fin["FEES AND ASSUMPTIONS"].dropna(subset=["CPO"]).copy()
     fees = fees[fees["CPO"] != "CPO - JV"].copy()
 
-    return tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees
+    return tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees, cp_excluded_count
 
-tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df = load_all(
+tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df, cp_excluded_count = load_all(
     file_bytes["transactions"], file_bytes["charge_points"], file_bytes["station_profile"],
     file_bytes["user_details"], file_bytes["wallet_txn"], file_bytes["financials"]
 
@@ -335,7 +343,19 @@ with st.sidebar:
     if st.checkbox("Use 24-hr capacity", value=False):
         op_hours = 24
 
-    target_util = st.slider("Target Utilization %", 50, 90, 70)
+    # Target utilization: ONE network-wide target in Company/Ops view
+    # (applies uniformly when comparing all selected stations), or a
+    # target PER STATION in Host Partner view — each station's slider
+    # keeps its own remembered value (via its own widget key) when you
+    # switch between sites, rather than sharing one global setting.
+    if is_company:
+        target_util = st.slider("Network Target Utilization %", 50, 90, 70,
+                                key="target_network")
+    else:
+        station_key = sel_stations[0]
+        target_util = st.slider(
+            f"Target Utilization % — {station_key[:22]}", 50, 90, 70,
+            key=f"target_station_{station_key}")
 
     st.markdown("---")
     days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
@@ -370,8 +390,12 @@ df_prior = tx[
 ].copy()
 
 # ── CORE METRICS ─────────────────────────────────────────────────────────────
-cp_sel = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations) & (cp_cap["CHARGER_ACTIVE"] == 1)]
-total_avail_kwh = cp_sel["CAPACITY_KW"].sum() * op_hours * days
+# cp_sel = all data-quality-valid connectors at the selected station(s),
+# regardless of online/offline (used for total counts + reliability KPIs)
+cp_sel = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations)]
+# Only ONLINE connectors contribute real, usable capacity for the period
+cp_sel_online = cp_sel[cp_sel["NETWORK_STATUS"] == "Online"]
+total_avail_kwh = cp_sel_online["CAPACITY_KW"].sum() * op_hours * days
 actual_kwh      = df["ENERGY_KWH"].sum()
 prior_kwh       = df_prior["ENERGY_KWH"].sum()
 net_util        = (actual_kwh / total_avail_kwh * 100) if total_avail_kwh > 0 else 0
@@ -385,9 +409,9 @@ prior_sess = len(df_prior)
 mom_sess   = (total_sess - prior_sess) / prior_sess * 100 if prior_sess > 0 else 0
 error_rate = (df_all["ISERROR"].astype(bool).sum() / len(df_all) * 100) if len(df_all) > 0 else 0
 total_cps   = len(cp_sel)
-online_cps  = len(cp_sel[cp_sel["NETWORK_STATUS"] == "Online"])
+online_cps  = len(cp_sel_online)
 offline_cps = len(cp_sel[cp_sel["NETWORK_STATUS"] == "Offline"])
-faulty_cps  = len(cp[cp["STATIONNAME"].isin(sel_stations) & (cp["CONNECTOR_STATUS"] == "Faulty")])
+faulty_cps  = len(cp_sel[cp_sel["CONNECTOR_STATUS"] == "Faulty"])
 uptime_pct  = (online_cps / total_cps * 100) if total_cps > 0 else 0
 avg_dur     = df["DURATION_MIN"].mean() if len(df) else 0
 
@@ -443,11 +467,20 @@ with st.expander("📐 Energy-Based Utilization Formula", expanded=False):
 Utilization Rate (%) = Σ Actual kWh Charged ÷ Total Available Capacity × 100
 
 Σ Actual kWh Charged     = {actual_kwh:,.1f} kWh  (ENERGY_KWH where ISERROR=0)
-Total Available Capacity = Active Connectors × CAPACITY_KW × {op_hours} hrs/day × {days} days
+Total Available Capacity = Online Connectors × CAPACITY_KW × {op_hours} hrs/day × {days} days
+                         = {online_cps} online connectors × {op_hours} hrs × {days} days
                          = {total_avail_kwh:,.0f} kWh
 Network Utilization      = {actual_kwh:,.1f} ÷ {total_avail_kwh:,.0f} × 100 = {net_util:.1f}%
 Gap vs {target_util}% target   = {util_gap:+.1f} pp
 </div>""", unsafe_allow_html=True)
+    st.caption(
+        f"📋 **Connector data quality:** {len(cp):,} raw rows in Charge Point Information → "
+        f"{len(cp_cap):,} valid (has PLUG_TYPE and CAPACITY_KW > 0) → "
+        f"{cp_excluded_count:,} excluded for missing/zero capacity data. "
+        f"Of the valid connectors, {total_cps:,} belong to your current selection, "
+        f"of which {online_cps:,} are Online and count toward available capacity "
+        f"({offline_cps:,} Offline, {faulty_cps:,} Faulty)."
+    )
 
 # ── KPI HELPER ────────────────────────────────────────────────────────────────
 def kpi(col, label, value, trend, tclass="up", border="#000000"):
@@ -543,7 +576,7 @@ for sname in sel_stations:
     s_cp  = cp_cap[cp_cap["STATIONNAME"] == sname]
     s_all = df_all[df_all["STATIONNAME"] == sname]
     s_kwh  = s_df["ENERGY_KWH"].sum()
-    s_cap  = s_cp[s_cp["CHARGER_ACTIVE"]==1]["CAPACITY_KW"].sum()
+    s_cap  = s_cp[s_cp["NETWORK_STATUS"]=="Online"]["CAPACITY_KW"].sum()
     s_avail = s_cap * op_hours * days
     s_util  = round(s_kwh / s_avail * 100, 1) if s_avail > 0 else 0
     s_rev   = s_df["TOTALAMOUNT"].sum()
@@ -719,7 +752,23 @@ if is_company:
 if not is_company:
     st.markdown(f"<div class='sec-hdr'>🔌 Connector Detail — {sel_stations[0]}</div>",
                 unsafe_allow_html=True)
-    site_cps = cp[cp["STATIONNAME"]==sel_stations[0]].drop_duplicates("CHARGER_ID")
+    # Charge Point Info is connector-level (a charger can have multiple plug
+    # rows), but Session Logs only track CHARGER_ID — so group here by
+    # charger for display, summing capacity and listing all its plug types,
+    # rather than showing one card per port (which would double-count
+    # that charger's sessions across cards).
+    site_rows = cp_cap[cp_cap["STATIONNAME"]==sel_stations[0]]
+    if len(site_rows):
+        site_cps = site_rows.groupby("CHARGER_ID").agg(
+            CAPACITY_KW=("CAPACITY_KW","sum"),
+            PLUG_TYPE=("PLUG_TYPE", lambda x: " + ".join(sorted(set(x)))),
+            CHARGER_TYPE=("CHARGER_TYPE","first"),
+            NETWORK_STATUS=("NETWORK_STATUS","first"),
+            CONNECTOR_STATUS=("CONNECTOR_STATUS","first"),
+            PORTS=("PLUG_TYPE","count"),
+        ).reset_index()
+    else:
+        site_cps = site_rows
     if len(site_cps):
         cols = st.columns(min(len(site_cps),5))
         for i,(_, row) in enumerate(site_cps.iterrows()):
@@ -731,11 +780,12 @@ if not is_company:
             cp_kwh  = cp_sess["ENERGY_KWH"].sum()
             cp_avail = row.get("CAPACITY_KW",0) * op_hours * days
             cp_util  = round(cp_kwh/cp_avail*100,1) if cp_avail>0 else 0
+            ports_label = f" · {int(row['PORTS'])} ports" if row.get("PORTS",1) > 1 else ""
             cols[i].markdown(
                 f"<div style='background:white;border-radius:6px;padding:11px;"
                 f"border-top:3px solid {sc};box-shadow:0 1px 4px rgba(0,0,0,.07)'>"
                 f"<div style='font-size:11px;font-weight:600;color:#000000'>{row['CHARGER_ID']}</div>"
-                f"<div style='font-size:9px;color:#5C574D'>{row.get('CHARGER_TYPE','—')} · {row.get('CAPACITY_KW','—')}kW</div>"
+                f"<div style='font-size:9px;color:#5C574D'>{row.get('CHARGER_TYPE','—')} · {row.get('CAPACITY_KW','—')}kW{ports_label}</div>"
                 f"<div style='font-size:9px;color:#5C574D'>{row.get('PLUG_TYPE','—')}</div>"
                 f"<div style='font-size:9px;color:{cs_col};margin-top:3px'>● {cs}</div>"
                 f"<hr style='margin:5px 0;border-color:#EAE0D0'>"
