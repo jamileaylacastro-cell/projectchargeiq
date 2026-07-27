@@ -240,7 +240,16 @@ file_bytes = st.session_state.chargeiq_file_bytes
 # ── LOAD ALL DATA ──────────────────────────────────────────────────────────
 @st.cache_data
 def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
-    tx = pd.read_excel(io.BytesIO(tx_b), sheet_name="transactions.csv")
+    # Transactions file: accept either an Excel workbook or a CSV file robustly.
+    try:
+        tx = pd.read_excel(io.BytesIO(tx_b))
+    except Exception:
+        # Fall back to CSV parsing if the uploaded bytes are a CSV file.
+        try:
+            tx = pd.read_csv(io.BytesIO(tx_b))
+        except Exception as e:
+            raise ValueError(f"Failed to parse transactions file as Excel or CSV: {e}")
+
     cp = pd.read_excel(io.BytesIO(cp_b))
     sp = pd.read_excel(io.BytesIO(sp_b))
     ud = pd.read_excel(io.BytesIO(ud_b))
