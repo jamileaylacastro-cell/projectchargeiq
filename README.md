@@ -1,17 +1,19 @@
 # EVOxCharge Analytics Dashboard
 
-Built with Streamlit + PyDeck
+Built with Streamlit + PyDeck. Includes a **Forecasting** page (ETS Additive / SARIMA demand
+forecasting) alongside the main dashboard — the dashboard is always the default landing page;
+Forecasting is reached via the sidebar page nav.
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-streamlit run evox_app.py
+streamlit run chargeiq_app.py
 ```
 
 ## Required data files
 
-Place these Excel files in the **same folder** as `evox_app.py`
+Place these Excel files in the **same folder** as `chargeiq_app.py`
 (or in a `/data` subfolder):
 
 | File | Source |
@@ -22,6 +24,10 @@ Place these Excel files in the **same folder** as `evox_app.py`
 | `Station_Profile.xlsx` | Station Profile export |
 | `Charge_Point_Information_...xlsx` | Charge Point Info export |
 | `Financials.xlsx` | Financials workbook |
+
+The **Forecasting** page (`pages/1_🔮_Forecasting.py`) is self-contained — it uses its own
+sidebar file uploader for a station-monitoring workbook (same format as
+`ForecastingModel_CD_v2.ipynb`), rather than the bundled files above.
 
 ## Security — DO NOT commit data files to GitHub
 
