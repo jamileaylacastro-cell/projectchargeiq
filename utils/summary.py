@@ -27,12 +27,12 @@ def compute_station_summary(
     df_ts: pd.DataFrame,
     daily_series: pd.Series,
     station_name: str,
-    target_col: str = "Energy Consumed (kWh)",
+    target_col: str = "ENERGY_KWH",
 ):
     """Returns an ordered dict of label -> value for the Station Profile panel,
     built from already-cleaned data. Returns None if there's nothing to summarize.
 
-    df_ts: the cleaned, station-filtered transaction-level dataframe (indexed by Start Time),
+    df_ts: the cleaned, station-filtered transaction-level dataframe (indexed by STARTTIME),
            as returned by clean_and_aggregate().
     daily_series: the cleaned daily-aggregated series for the same station/target, also from
                   clean_and_aggregate().
@@ -55,14 +55,14 @@ def compute_station_summary(
         vals = df_ts[region_col].dropna()
         region_value = vals.iloc[0] if not vals.empty else None
 
-    n_points = df_ts["Charging Point ID"].nunique() if "Charging Point ID" in df_ts.columns else None
+    n_points = df_ts["CONNECTOR_NUMBER"].nunique() if "CONNECTOR_NUMBER" in df_ts.columns else None
     charger_types = (
-        sorted(df_ts["Charger Type"].dropna().unique().tolist())
-        if "Charger Type" in df_ts.columns else []
+        sorted(df_ts["CHARGE_TYPE"].dropna().unique().tolist())
+        if "CHARGE_TYPE" in df_ts.columns else []
     )
     plug_types = (
-        sorted(df_ts["Plug Type"].dropna().unique().tolist())
-        if "Plug Type" in df_ts.columns else []
+        sorted(df_ts["AC_DC"].dropna().unique().tolist())
+        if "AC_DC" in df_ts.columns else []
     )
 
     summary = {

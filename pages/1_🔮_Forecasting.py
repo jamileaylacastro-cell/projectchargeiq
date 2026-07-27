@@ -128,11 +128,14 @@ st.sidebar.markdown("### 🔮 Forecasting Control Panel")
 
 uploaded = st.sidebar.file_uploader(
     "Station monitoring workbook (.xlsx)", type=["xlsx"],
-    help="Same transaction-level export used in the analysis notebook.",
+    help="Transactions sheet with STATIONNAME, STARTTIME, ENDTIME, and ENERGY_KWH columns "
+         "(same schema as the dashboard's transactions.xlsx). Duration is computed automatically.",
 )
 header_row = st.sidebar.number_input(
-    "Header row (0-indexed)", min_value=0, max_value=20, value=6,
-    help="Row where the actual column headers start in the sheet — matches the notebook's `header=6`.",
+    "Header row (0-indexed)", min_value=0, max_value=20, value=0,
+    help="Row where the actual column headers start in the sheet. The transactions sheet "
+         "has headers on the first row (0), so that's the default — adjust if a future "
+         "export shifts them.",
 )
 
 if uploaded is None:
@@ -143,15 +146,17 @@ if uploaded is None:
     st.stop()
 
 raw = load_workbook(uploaded, header_row)
-required_cols = {"Charging Station Name", "Start Time", "End Time", "Duration", "Energy Consumed (kWh)"}
+# Duration is derived (ENDTIME - STARTTIME), not a column in the source file,
+# so it's not required here.
+required_cols = {"STATIONNAME", "STARTTIME", "ENDTIME", "ENERGY_KWH"}
 missing = required_cols - set(raw.columns)
 if missing:
     st.error(f"The uploaded file is missing expected columns: {sorted(missing)}. Check the header row setting.")
     st.stop()
 
-target_column = "Energy Consumed (kWh)"  # kWh is the only supported target (Amount was dropped as an option)
+target_column = "ENERGY_KWH"  # kWh is the only supported target (Amount was dropped as an option)
 
-stations = sorted(raw["Charging Station Name"].dropna().unique())
+stations = sorted(raw["STATIONNAME"].dropna().unique())
 selected_station = st.sidebar.selectbox("Charging station", stations)
 
 model_choice = st.sidebar.radio("Forecasting model", ["ETS Additive", "SARIMA"])
