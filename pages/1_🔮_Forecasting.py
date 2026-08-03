@@ -8,7 +8,8 @@ from utils.models import run_backtest, run_forward_forecast
 from utils.summary import compute_station_summary
 from utils.diagnostics import compute_residuals, acf_pacf_data, qq_plot_data, ljung_box_test
 
-st.set_page_config(page_title="Project ChargeIQ — Forecasting", page_icon="🔮", layout="wide")
+# Page config is set once by the router (chargeiq_app.py) before st.navigation
+# runs this page — calling it again here would raise a StreamlitAPIException.
 
 # ---------------------------------------------------------------------------
 # Theme (same dark console look as the standalone forecasting prototype)

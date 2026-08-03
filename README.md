@@ -1,8 +1,9 @@
 # EVOxCharge Analytics Dashboard
 
-Built with Streamlit + PyDeck. Includes a **Forecasting** page (ETS Additive / SARIMA demand
-forecasting) alongside the main dashboard — the dashboard is always the default landing page;
-Forecasting is reached via the sidebar page nav.
+Built with Streamlit + PyDeck. Includes a **Forecasting Model** page (ETS Additive / SARIMA
+demand forecasting) and a **Documentation** page alongside the main dashboard — the
+dashboard is always the default landing page; the other two are reached via the sidebar
+page nav.
 
 ## Setup
 
@@ -25,9 +26,10 @@ Place these Excel files in the **same folder** as `chargeiq_app.py`
 | `Charge_Point_Information_...xlsx` | Charge Point Info export |
 | `Financials.xlsx` | Financials workbook |
 
-The **Forecasting** page (`pages/1_🔮_Forecasting.py`) is self-contained — it uses its own
-sidebar file uploader for a station-monitoring workbook (same format as
-`ForecastingModel_CD_v2.ipynb`), rather than the bundled files above.
+The **Forecasting Model** page (`pages/1_🔮_Forecasting.py`, routed as "Forecasting Model"
+in the sidebar) is self-contained — it uses its own sidebar file uploader for a
+transactions-format workbook (same schema as `transactions.xlsx` above: `STATIONNAME`,
+`STARTTIME`, `ENDTIME`, `ENERGY_KWH`), rather than the bundled files above.
 
 ## Security — DO NOT commit data files to GitHub
 
@@ -37,7 +39,8 @@ For deployment, use one of the options below.
 ## Deployment options
 
 ### Option A — Streamlit Community Cloud (recommended for sharing)
-1. Push only `evox_app.py`, `requirements.txt`, `.gitignore` to GitHub
+1. Push `chargeiq_app.py` (entry point), `dashboard.py`, `pages/`, `utils/`,
+   `requirements.txt`, `.gitignore` to GitHub — deploy pointing at `chargeiq_app.py`
 2. Upload data files as Streamlit Secrets or use a private Google Sheet
 3. Deploy at share.streamlit.io
 
