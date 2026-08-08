@@ -323,6 +323,10 @@ with st.sidebar:
               "typically run 5–15% utilization; ~15% is the threshold "
               "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
 
+    if st.button("Change data source", use_container_width=True):
+        st.session_state.chargeiq_data_ready = False
+        st.rerun()
+
 st.markdown("---")
 days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
 n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
