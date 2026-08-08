@@ -1,15 +1,46 @@
 # Project ChargeIQ (EVOxCharge Analytics Dashboard)
 
-Streamlit app with two pages: the main analytics **dashboard** (`chargeiq_app.py`, always
-the default landing page) and a **Forecasting** page (`pages/1_🔮_Forecasting.py`) reached
-via the sidebar nav, added via Streamlit's `pages/` auto-discovery convention. Run with:
+Streamlit app with three pages, labeled "Dashboard", "Forecasting Model", and
+"Documentation" in the sidebar nav — Dashboard is always the default landing page. Run with:
 
 ```bash
 pip install -r requirements.txt
 streamlit run chargeiq_app.py
 ```
 
-## Dashboard (`chargeiq_app.py`)
+### App structure — explicit router, not filename-derived nav
+
+`chargeiq_app.py` is now a thin **router**, not the dashboard itself — it stays the
+deployment entry point (existing deployments point at this filename) but its only job is
+`st.set_page_config(...)` once, then:
+
+```python
+pg = st.navigation([
+    st.Page("dashboard.py", title="Dashboard", default=True),
+    st.Page("pages/1_🔮_Forecasting.py", title="Forecasting Model", icon="🔮"),
+    st.Page("pages/2_📄_Documentation.py", title="Documentation", icon="📄"),
+])
+pg.run()
+```
+
+This is deliberate: Streamlit's classic `pages/` auto-discovery derives sidebar labels from
+filenames (which is why it used to show "chargeiq app"), and `st.navigation`'s explicit
+`title=` was the only way to get exact custom labels without renaming the entry-point file
+and breaking the live deployment pointing at it.
+
+**Documentation page** (`pages/2_📄_Documentation.py`) is static reference content (no data
+loading) — two `st.tabs()`, one summarizing the Dashboard (data files, views, filters,
+utilization formula, KPI sections), one summarizing the Forecasting Model (data schema,
+cleaning rules, models, backtest results, known limitations). It's derived from the
+dashboard's actual code and the draft Model Documentation (see [[reference-model-documentation]]
+in project memory) — update it if either page's behavior changes materially, since nothing
+enforces it staying in sync with the code.
+
+**Consequence:** only the router (`chargeiq_app.py`) may call `st.set_page_config()` —
+calling it again in a page script (dashboard.py or the Forecasting page) raises a
+`StreamlitAPIException`, since all pages run inside the same session once routed.
+
+## Dashboard (`dashboard.py`, routed via `chargeiq_app.py`)
 
 Reads 6 bundled Excel exports (transactions, user details, wallet transactions, station
 profile, charge point info, financials — see README for the full list/schema). Data files

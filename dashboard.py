@@ -1,24 +1,10 @@
 import streamlit as st
-from utils.cleaning_dashboard import load_dashboard_data
+import pandas as pd
+import numpy as np
+import pydeck as pdk
+import io
+from pathlib import Path
 
-# ── PAGE CONFIG ─────────────────────────────────────────────────────────────
-# Set once here, in the router — individual pages must NOT call
-# st.set_page_config() themselves once st.navigation() is in use.
-st.set_page_config(page_title="Project ChargeIQ Analytics", page_icon="⚡",
-                   layout="wide", initial_sidebar_state="expanded")
-
-# ── NAVIGATION ───────────────────────────────────────────────────────────────
-# This file stays the deployment entry point (`streamlit run chargeiq_app.py`)
-# so existing deployments pointing at this filename keep working. The actual
-# dashboard content lives in dashboard.py; this file is just the router, which
-# lets us set explicit sidebar nav labels instead of Streamlit's
-# filename-derived defaults.
-pg = st.navigation([
-    st.Page("dashboard.py", title="Dashboard", default=True),
-    st.Page("pages/1_🔮_Forecasting.py", title="Forecasting Model", icon="🔮"),
-    st.Page("pages/2_📄_Documentation.py", title="Documentation", icon="📄"),
-])
-pg.run()
 # ── BRAND PALETTE ────────────────────────────────────────────────────────────
 # Lime #BEFF6C · Cream #FFF4EC · White #FFFFFF · Black #000000 (accent)
 st.markdown("""
@@ -158,7 +144,6 @@ FILE_LABELS = {
     "user_details":    "User Details (.xlsx)",
     "wallet_txn":      "Wallet Transactions (.xlsx)",
     "financials":      "Financials Workbook (.xlsx)",
-    "transactions_excluded": "Transactions to exclude (.xlsx)"
 }
 FILE_DEFAULTS = {
     "transactions":    "transactions.xlsx",
@@ -167,7 +152,6 @@ FILE_DEFAULTS = {
     "user_details":    "UserDetails.xlsx",
     "wallet_txn":      "walletTransactions.xlsx",
     "financials":      "ProjectChargeIQ_Financials.xlsx",
-    "transactions_excluded": "Transactions_to_exclude.xlsx"
 }
 
 def disk_path(filename):
@@ -252,7 +236,106 @@ file_bytes = st.session_state.chargeiq_file_bytes
 # ── LOAD ALL DATA ──────────────────────────────────────────────────────────
 @st.cache_data
 def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
-    return load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b)
+    # Transactions file: accept either an Excel workbook or a CSV file robustly.
+    try:
+        tx = pd.read_excel(io.BytesIO(tx_b))
+    except Exception:
+        # Fall back to CSV parsing if the uploaded bytes are a CSV file.
+        try:
+            tx = pd.read_csv(io.BytesIO(tx_b))
+        except Exception as e:
+            raise ValueError(f"Failed to parse transactions file as Excel or CSV: {e}")
+
+    cp = pd.read_excel(io.BytesIO(cp_b))
+    sp = pd.read_excel(io.BytesIO(sp_b))
+    ud = pd.read_excel(io.BytesIO(ud_b))
+    wt = pd.read_excel(io.BytesIO(wt_b))
+    fin = pd.read_excel(io.BytesIO(fin_b), sheet_name=None)
+
+    tx["STARTTIME"] = pd.to_datetime(tx["STARTTIME"], errors="coerce")
+    tx["ENDTIME"]   = pd.to_datetime(tx["ENDTIME"],   errors="coerce")
+    tx = tx[tx["STARTTIME"].dt.year > 2020].copy()
+    tx["DATE"]  = tx["STARTTIME"].dt.date
+    tx["MONTH"] = tx["STARTTIME"].dt.to_period("M")
+    tx["HOUR"]  = tx["STARTTIME"].dt.hour
+    tx["DURATION_MIN"] = (tx["ENDTIME"] - tx["STARTTIME"]).dt.total_seconds() / 60
+
+    # Guard against corrupted ENDTIME values — some sessions have ENDTIME
+    # defaulted to a placeholder date (e.g. 1900-01-02), almost certainly
+    # sessions that never closed out properly in the source system. That
+    # produces wildly negative durations (or, rarely, implausibly long
+    # ones) that would badly skew a plain average. The session itself
+    # (energy, revenue, station) stays in the data — only its duration is
+    # excluded from duration-based metrics.
+    _dur_bad = (tx["DURATION_MIN"] < 0) | (tx["DURATION_MIN"] > 1440)
+    dur_excluded_count = int(_dur_bad.sum())
+    tx.loc[_dur_bad, "DURATION_MIN"] = np.nan
+
+    sp_coords = sp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE","BUSINESS_START","BUSINESS_END","RATE_PER_KWH"]].first().reset_index()
+    cp = cp.merge(sp_coords[["STATIONNAME","BUSINESS_START","BUSINESS_END"]], on="STATIONNAME", how="left")
+
+    cp_coords = cp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE"]].first().reset_index()
+    tx = tx.merge(cp_coords, on="STATIONNAME", how="left")
+
+    sp_ll = sp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE"]].first().reset_index()
+    missing_ll = tx["LATITUDE"].isna()
+    tx_miss = tx[missing_ll].drop(columns=["LATITUDE","LONGITUDE"]).merge(
+        sp_ll, on="STATIONNAME", how="left")
+    tx.loc[missing_ll, "LATITUDE"]  = tx_miss["LATITUDE"].values
+    tx.loc[missing_ll, "LONGITUDE"] = tx_miss["LONGITUDE"].values
+
+    # ── Charge Point Info is stored at the CONNECTOR level, not one row
+    #    per charger — a single CHARGER_ID can have 2, 4, 6, or 8 rows
+    #    (one per physical plug). Grouping by CHARGER_ID and taking the
+    #    first row (the old approach) silently discarded real connectors
+    #    and could pick an incomplete row over a complete sibling row.
+    #
+    #    "Total chargepoints" = rows with a real PLUG_TYPE and
+    #    CAPACITY_KW > 0 (regardless of online/offline, so offline counts
+    #    can still be reported).
+    #    "Available capacity" (the utilization denominator) = the subset
+    #    of those that are also NETWORK_STATUS == 'Online', since an
+    #    offline connector contributes no real capacity for the period.
+    cp_cap = cp[
+        cp["PLUG_TYPE"].notna() &
+        (cp["PLUG_TYPE"].astype(str).str.strip() != "") &
+        cp["CAPACITY_KW"].notna() &
+        (cp["CAPACITY_KW"] > 0)
+    ].copy()
+    cp_excluded_count = len(cp) - len(cp_cap)
+
+    fin_overall = fin["OVERALL"].dropna(subset=["CPO"]).copy()
+    fin_overall.columns = ["CPO","Revenue","ActualElecCost","EstElecCost",
+                            "ActualRent","EstRent","EstIncome2026"]
+    fin_overall = fin_overall[fin_overall["CPO"] != "SUB TOTAL:"].copy()
+
+    opex = fin["ACTUAL OPEX (JAN-JUN)"].copy()
+    opex.columns = ["CPO","ElecJan","ElecFeb","ElecMar","ElecApr","ElecMay","ElecJun",
+                    "RentJan","RentFeb","RentMar","RentApr","RentMay","RentJun","Remarks"]
+    opex = opex[opex["CPO"].notna() & (opex["CPO"] != "CPO") & (opex["CPO"] != "CPO - JV")].copy()
+
+    fees = fin["FEES AND ASSUMPTIONS"].dropna(subset=["CPO"]).copy()
+    fees = fees[fees["CPO"] != "CPO - JV"].copy()
+
+    # CAPEX sheet — needed for payback calculations, not previously loaded
+    capex = fin["CAPEX"][["SITES","TOTAL CAPEX"]].dropna(subset=["SITES"]).copy()
+    capex.columns = ["STATIONNAME","TOTAL_CAPEX"]
+    capex = capex[~capex["STATIONNAME"].isin(["CPO"])].copy()
+
+    # Payback can only be computed for stations whose Financials-workbook
+    # name actually matches a real STATIONNAME in the session data — most
+    # CPO entries in the workbook do NOT correspond to a station with any
+    # transaction history at all (separate business entities, or simply
+    # not represented in Session Logs).
+    tx_station_set = set(tx["STATIONNAME"].dropna().unique())
+    fin_costs = fin_overall[["CPO","ActualElecCost","ActualRent"]].rename(
+        columns={"CPO":"STATIONNAME"})
+    payback_ref = capex.merge(fin_costs, on="STATIONNAME", how="inner")
+    payback_ref = payback_ref[payback_ref["STATIONNAME"].isin(tx_station_set)].copy()
+    payback_ref = payback_ref[payback_ref["TOTAL_CAPEX"] > 0].copy()  # exclude stations with no recorded investment
+
+    return (tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees, capex, payback_ref,
+            cp_excluded_count, dur_excluded_count)
 
 (tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df, capex_df, payback_ref,
  cp_excluded_count, dur_excluded_count) = load_all(
