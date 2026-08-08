@@ -269,58 +269,59 @@ excl_b = file_bytes.get("transactions_excluded")
     payback_ref, cp_excluded_count, dur_excluded_count
 ) = load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, excl_b)
 
-# View selector: Company/Ops vs Host Partner Site
-view = st.radio("View", ["🏢  Company / Ops", "🏪  Host Partner Site"], horizontal=True)
-is_company = view.startswith("🏢")
+with st.sidebar:
+    st.markdown("## Filters")
+    view = st.radio("View", ["🏢  Company / Ops", "🏪  Host Partner Site"], horizontal=True)
+    is_company = view.startswith("🏢")
 
-all_stations = sorted(tx["STATIONNAME"].dropna().unique().tolist())
+    all_stations = sorted(tx["STATIONNAME"].dropna().unique().tolist())
 
-if is_company:
-    sel_stations = st.multiselect("Stations", all_stations, default=all_stations[:10])
-    if not sel_stations:
-        sel_stations = all_stations
-else:
-    sel_station  = st.selectbox("Site", all_stations, index=0)
-    sel_stations = [sel_station]
+    if is_company:
+        sel_stations = st.multiselect("Stations", all_stations, default=all_stations[:10])
+        if not sel_stations:
+            sel_stations = all_stations
+    else:
+        sel_station  = st.selectbox("Site", all_stations, index=0)
+        sel_stations = [sel_station]
 
-all_months    = sorted(tx["MONTH"].dropna().unique().tolist(), reverse=True)
-month_labels  = [str(m) for m in all_months]
-sel_month_lbl = st.selectbox("Month", month_labels, index=0)
-sel_month     = all_months[month_labels.index(sel_month_lbl)]
+    all_months    = sorted(tx["MONTH"].dropna().unique().tolist(), reverse=True)
+    month_labels  = [str(m) for m in all_months]
+    sel_month_lbl = st.selectbox("Month", month_labels, index=0)
+    sel_month     = all_months[month_labels.index(sel_month_lbl)]
 
-charge_types = st.multiselect("Charge Type",
-    tx["CHARGE_TYPE"].dropna().unique().tolist(),
-    default=tx["CHARGE_TYPE"].dropna().unique().tolist())
+    charge_types = st.multiselect("Charge Type",
+        tx["CHARGE_TYPE"].dropna().unique().tolist(),
+        default=tx["CHARGE_TYPE"].dropna().unique().tolist())
 
-op_hours = st.slider("Operating hrs / day", 8, 24, 12)
-if st.checkbox("Use 24-hr capacity", value=False):
-    op_hours = 24
+    op_hours = st.slider("Operating hrs / day", 8, 24, 12)
+    if st.checkbox("Use 24-hr capacity", value=False):
+        op_hours = 24
 
-# Target utilization: ONE network-wide target in Company/Ops view
-# (applies uniformly when comparing all selected stations), or a
-# target PER STATION in Host Partner view — each station's slider
-# keeps its own remembered value (via its own widget key) when you
-# switch between sites, rather than sharing one global setting.
-#
-# Range and default reflect published EV charger utilization
-# benchmarks, not an assumption of high usage: public charger
-# utilization typically sits at 5–15%, McKinsey cites ~15% as the
-# threshold for economic viability, and even the most mature EU
-# markets peak around 30%. Source: Topal, O. (2025), "A comprehensive
-# analysis of capacity utilization rates of fast-charging stations in
-# shopping malls," Int J Low-Carbon Tech, 20, 1646–1660.
-# https://doi.org/10.1093/ijlct/ctaf100
-if is_company:
-    target_util = st.slider("Network Target Utilization %", 1, 40, 15,
-                            key="target_network")
-else:
-    station_key = sel_stations[0]
-    target_util = st.slider(
-        f"Target Utilization % — {station_key[:22]}", 1, 40, 15,
-        key=f"target_station_{station_key}")
-st.caption("📚 Range reflects published benchmarks: public EV chargers "
-          "typically run 5–15% utilization; ~15% is the threshold "
-          "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
+    # Target utilization: ONE network-wide target in Company/Ops view
+    # (applies uniformly when comparing all selected stations), or a
+    # target PER STATION in Host Partner view — each station's slider
+    # keeps its own remembered value (via its own widget key) when you
+    # switch between sites, rather than sharing one global setting.
+    #
+    # Range and default reflect published EV charger utilization
+    # benchmarks, not an assumption of high usage: public charger
+    # utilization typically sits at 5–15%, McKinsey cites ~15% as the
+    # threshold for economic viability, and even the most mature EU
+    # markets peak around 30%. Source: Topal, O. (2025), "A comprehensive
+    # analysis of capacity utilization rates of fast-charging stations in
+    # shopping malls," Int J Low-Carbon Tech, 20, 1646–1660.
+    # https://doi.org/10.1093/ijlct/ctaf100
+    if is_company:
+        target_util = st.slider("Network Target Utilization %", 1, 40, 15,
+                                key="target_network")
+    else:
+        station_key = sel_stations[0]
+        target_util = st.slider(
+            f"Target Utilization % — {station_key[:22]}", 1, 40, 15,
+            key=f"target_station_{station_key}")
+    st.caption("📚 Range reflects published benchmarks: public EV chargers "
+              "typically run 5–15% utilization; ~15% is the threshold "
+              "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
 
 st.markdown("---")
 days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
