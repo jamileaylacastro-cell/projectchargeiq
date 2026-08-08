@@ -194,8 +194,8 @@ if not st.session_state.chargeiq_data_ready:
         st.success("✅ Bundled dataset found alongside the app. You can start immediately, "
                    "or upload replacements for any file below before starting.")
     else:
-        found = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if v]
-        need  = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if not v]
+        found = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if k in FILE_DEFAULTS and v]
+        need  = [FILE_DEFAULTS[k] for k, v in bundled_status.items() if k in FILE_DEFAULTS and not v]
         if found:
             st.info(f"Found {len(found)}/6 bundled files. Upload the remaining {len(need)} to continue.")
         else:
