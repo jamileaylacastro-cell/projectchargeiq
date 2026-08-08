@@ -23,19 +23,28 @@ with tab_dash:
     st.markdown("### Required data files")
     st.markdown(
         """
-| File | Source | Used for |
+| File | Source | Key columns |
 |---|---|---|
-| `transactions.xlsx` | Session Logs export | Session-level KPIs, charts, utilization |
-| `UserDetails.xlsx` | User Profile export | Registered users, wallet balance, car brand/plug distributions |
-| `walletTransactions.xlsx` | Transaction Logs export | Refund rate |
-| `Station_Profile.xlsx` | Station Profile export | Coordinates, operating hours, rate per kWh |
-| `Charge_Point_Information_...xlsx` | Charge Point Info export | Connector counts, capacity, online/offline status |
-| `ProjectChargeIQ_Financials.xlsx` | Financials workbook | Revenue/cost breakdown, payback tracking |
+| `transactions.xlsx` | Session Logs export | `STATIONNAME`, `STARTTIME`, `ENDTIME`, `ENERGY_KWH`, `CHARGE_TYPE`, `ISERROR`, `TOTALAMOUNT`, `USERID`, `CHARGER_ID` |
+| `Transactions_to_exclude.xlsx` | Optional exclusion list | Any columns overlapping with `transactions.xlsx`; rows matching on the shared columns are removed from the dashboard session data |
+| `UserDetails.xlsx` | User Profile export | `ACCOUNT_STATUS`, `WALLET_BALANCE`, `CARBRAND`, `PLUG_TYPE` |
+| `walletTransactions.xlsx` | Transaction Logs export | `TRANSACTION_DATE`, `REFUNDEDTRANSACTIONNO` |
+| `Station_Profile.xlsx` | Station Profile export | `STATIONNAME`, `LATITUDE`, `LONGITUDE`, `BUSINESS_START`, `BUSINESS_END`, `RATE_PER_KWH`, `ADDRESS`, `STATION_ACTIVE` |
+| `Charge_Point_Information_...xlsx` | Charge Point Info export | `STATIONNAME`, `CHARGER_ID`, `CHARGER_TYPE`, `PLUG_TYPE`, `CAPACITY_KW`, `NETWORK_STATUS`, `CONNECTOR_STATUS`, optional `RATE_PER_KWH` |
+| `ProjectChargeIQ_Financials.xlsx` | Financials workbook | sheets: `OVERALL`, `ACTUAL OPEX (JAN-JUN)`, `FEES AND ASSUMPTIONS`, `CAPEX`; key columns include `CPO`, `Revenue`, `ActualElecCost`, `ActualRent`, `TOTAL CAPEX` |
 """
     )
     st.caption(
         "The transactions file is parsed as Excel first, with a fallback to CSV parsing "
         "if the upload is actually a `.csv` file saved with an `.xlsx` name."
+    )
+
+    st.markdown("### Optional excluded-transactions file")
+    st.markdown(
+        "Use `Transactions_to_exclude.xlsx` to remove rows from `transactions.xlsx` before "
+        "the dashboard computes utilization, revenue, and reliability metrics. The app matches "
+        "rows between the two files on whichever columns they share and excludes any exact "
+        "matches found in the exclusion file."
     )
 
     st.markdown("### Two views")
@@ -146,6 +155,11 @@ with tab_forecast:
 | `STATIONNAME` | Station identifier — one model is fit per selected station |
 | `STARTTIME` / `ENDTIME` | Session start/end timestamps |
 | `ENERGY_KWH` | Target variable — energy delivered during the session |
+| `CHARGE_TYPE` | Session/charge mode filter used by the dashboard schema |
+| `ISERROR` | Error flag for excluding invalid sessions from utilization and revenue |
+| `TOTALAMOUNT` | Revenue per session, used for revenue KPIs in the dashboard schema |
+| `USERID` | Customer identifier used for repeat-customer and active-user metrics |
+| `CHARGER_ID` | Connector-level session grouping for the Site view |
 | *(derived)* `Duration` | `ENDTIME − STARTTIME`, computed before the cleaning checks run — not a source column |
 """
     )

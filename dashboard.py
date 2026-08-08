@@ -4,6 +4,7 @@ import numpy as np
 import pydeck as pdk
 import io
 from pathlib import Path
+from utils.cleaning_dashboard import load_dashboard_data
 
 # ── BRAND PALETTE ────────────────────────────────────────────────────────────
 # Lime #BEFF6C · Cream #FFF4EC · White #FFFFFF · Black #000000 (accent)
@@ -144,6 +145,7 @@ FILE_LABELS = {
     "user_details":    "User Details (.xlsx)",
     "wallet_txn":      "Wallet Transactions (.xlsx)",
     "financials":      "Financials Workbook (.xlsx)",
+    "transactions_excluded": "Transactions to exclude (.xlsx)"
 }
 FILE_DEFAULTS = {
     "transactions":    "transactions.xlsx",
@@ -160,8 +162,15 @@ def disk_path(filename):
             return candidate
     return None
 
-bundled_status = {key: disk_path(fname) is not None for key, fname in FILE_DEFAULTS.items()}
-all_bundled = all(bundled_status.values())
+bundled_status = {}
+for key in FILE_LABELS.keys():
+    if key in FILE_DEFAULTS:
+        bundled_status[key] = disk_path(FILE_DEFAULTS[key]) is not None
+    elif key == "transactions_excluded":
+        bundled_status[key] = disk_path("Transactions_to_exclude.xlsx") is not None
+    else:
+        bundled_status[key] = False
+all_bundled = all(v for k, v in bundled_status.items() if k in FILE_DEFAULTS)
 
 if "chargeiq_data_ready" not in st.session_state:
     st.session_state.chargeiq_data_ready = False
@@ -197,7 +206,7 @@ if not st.session_state.chargeiq_data_ready:
     gate_uploaded = {}
     for i, (key, label) in enumerate(FILE_LABELS.items()):
         with up_cols[i % 3]:
-            status = "✅ bundled" if bundled_status[key] else "⚠️ required"
+            status = "✅ bundled" if bundled_status.get(key, False) else "⚠️ required"
             st.caption(f"{label} — {status}")
             gate_uploaded[key] = st.file_uploader(label, type=["xlsx"],
                                                   key=f"gate_up_{key}", label_visibility="collapsed")
@@ -225,6 +234,14 @@ if not st.session_state.chargeiq_data_ready:
             else:
                 p = disk_path(fname)
                 resolved[key] = p.read_bytes() if p else None
+        # Optional excluded-transactions file
+        excl_up = gate_uploaded.get("transactions_excluded")
+        if excl_up is not None:
+            resolved["transactions_excluded"] = excl_up.getvalue()
+        else:
+            p = disk_path("Transactions_to_exclude.xlsx")
+            resolved["transactions_excluded"] = p.read_bytes() if p else None
+
         st.session_state.chargeiq_file_bytes = resolved
         st.session_state.chargeiq_data_ready = True
         st.rerun()
@@ -235,185 +252,84 @@ file_bytes = st.session_state.chargeiq_file_bytes
 
 # ── LOAD ALL DATA ──────────────────────────────────────────────────────────
 @st.cache_data
-def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
-    # Transactions file: accept either an Excel workbook or a CSV file robustly.
-    try:
-        tx = pd.read_excel(io.BytesIO(tx_b))
-    except Exception:
-        # Fall back to CSV parsing if the uploaded bytes are a CSV file.
-        try:
-            tx = pd.read_csv(io.BytesIO(tx_b))
-        except Exception as e:
-            raise ValueError(f"Failed to parse transactions file as Excel or CSV: {e}")
+def load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, tx_excluded_b=None):
+    return load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, tx_excluded_b)
 
-    cp = pd.read_excel(io.BytesIO(cp_b))
-    sp = pd.read_excel(io.BytesIO(sp_b))
-    ud = pd.read_excel(io.BytesIO(ud_b))
-    wt = pd.read_excel(io.BytesIO(wt_b))
-    fin = pd.read_excel(io.BytesIO(fin_b), sheet_name=None)
+# Prepare bytes and call the loader
+tx_b   = file_bytes.get("transactions")
+cp_b   = file_bytes.get("charge_points")
+sp_b   = file_bytes.get("station_profile")
+ud_b   = file_bytes.get("user_details")
+wt_b   = file_bytes.get("wallet_txn")
+fin_b  = file_bytes.get("financials")
+excl_b = file_bytes.get("transactions_excluded")
 
-    tx["STARTTIME"] = pd.to_datetime(tx["STARTTIME"], errors="coerce")
-    tx["ENDTIME"]   = pd.to_datetime(tx["ENDTIME"],   errors="coerce")
-    tx = tx[tx["STARTTIME"].dt.year > 2020].copy()
-    tx["DATE"]  = tx["STARTTIME"].dt.date
-    tx["MONTH"] = tx["STARTTIME"].dt.to_period("M")
-    tx["HOUR"]  = tx["STARTTIME"].dt.hour
-    tx["DURATION_MIN"] = (tx["ENDTIME"] - tx["STARTTIME"]).dt.total_seconds() / 60
+(
+    tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees, capex,
+    payback_ref, cp_excluded_count, dur_excluded_count
+) = load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, excl_b)
 
-    # Guard against corrupted ENDTIME values — some sessions have ENDTIME
-    # defaulted to a placeholder date (e.g. 1900-01-02), almost certainly
-    # sessions that never closed out properly in the source system. That
-    # produces wildly negative durations (or, rarely, implausibly long
-    # ones) that would badly skew a plain average. The session itself
-    # (energy, revenue, station) stays in the data — only its duration is
-    # excluded from duration-based metrics.
-    _dur_bad = (tx["DURATION_MIN"] < 0) | (tx["DURATION_MIN"] > 1440)
-    dur_excluded_count = int(_dur_bad.sum())
-    tx.loc[_dur_bad, "DURATION_MIN"] = np.nan
+# View selector: Company/Ops vs Host Partner Site
+view = st.radio("View", ["🏢  Company / Ops", "🏪  Host Partner Site"], horizontal=True)
+is_company = view.startswith("🏢")
 
-    sp_coords = sp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE","BUSINESS_START","BUSINESS_END","RATE_PER_KWH"]].first().reset_index()
-    cp = cp.merge(sp_coords[["STATIONNAME","BUSINESS_START","BUSINESS_END"]], on="STATIONNAME", how="left")
+all_stations = sorted(tx["STATIONNAME"].dropna().unique().tolist())
 
-    cp_coords = cp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE"]].first().reset_index()
-    tx = tx.merge(cp_coords, on="STATIONNAME", how="left")
+if is_company:
+    sel_stations = st.multiselect("Stations", all_stations, default=all_stations[:10])
+    if not sel_stations:
+        sel_stations = all_stations
+else:
+    sel_station  = st.selectbox("Site", all_stations, index=0)
+    sel_stations = [sel_station]
 
-    sp_ll = sp.groupby("STATIONNAME")[["LATITUDE","LONGITUDE"]].first().reset_index()
-    missing_ll = tx["LATITUDE"].isna()
-    tx_miss = tx[missing_ll].drop(columns=["LATITUDE","LONGITUDE"]).merge(
-        sp_ll, on="STATIONNAME", how="left")
-    tx.loc[missing_ll, "LATITUDE"]  = tx_miss["LATITUDE"].values
-    tx.loc[missing_ll, "LONGITUDE"] = tx_miss["LONGITUDE"].values
+all_months    = sorted(tx["MONTH"].dropna().unique().tolist(), reverse=True)
+month_labels  = [str(m) for m in all_months]
+sel_month_lbl = st.selectbox("Month", month_labels, index=0)
+sel_month     = all_months[month_labels.index(sel_month_lbl)]
 
-    # ── Charge Point Info is stored at the CONNECTOR level, not one row
-    #    per charger — a single CHARGER_ID can have 2, 4, 6, or 8 rows
-    #    (one per physical plug). Grouping by CHARGER_ID and taking the
-    #    first row (the old approach) silently discarded real connectors
-    #    and could pick an incomplete row over a complete sibling row.
-    #
-    #    "Total chargepoints" = rows with a real PLUG_TYPE and
-    #    CAPACITY_KW > 0 (regardless of online/offline, so offline counts
-    #    can still be reported).
-    #    "Available capacity" (the utilization denominator) = the subset
-    #    of those that are also NETWORK_STATUS == 'Online', since an
-    #    offline connector contributes no real capacity for the period.
-    cp_cap = cp[
-        cp["PLUG_TYPE"].notna() &
-        (cp["PLUG_TYPE"].astype(str).str.strip() != "") &
-        cp["CAPACITY_KW"].notna() &
-        (cp["CAPACITY_KW"] > 0)
-    ].copy()
-    cp_excluded_count = len(cp) - len(cp_cap)
+charge_types = st.multiselect("Charge Type",
+    tx["CHARGE_TYPE"].dropna().unique().tolist(),
+    default=tx["CHARGE_TYPE"].dropna().unique().tolist())
 
-    fin_overall = fin["OVERALL"].dropna(subset=["CPO"]).copy()
-    fin_overall.columns = ["CPO","Revenue","ActualElecCost","EstElecCost",
-                            "ActualRent","EstRent","EstIncome2026"]
-    fin_overall = fin_overall[fin_overall["CPO"] != "SUB TOTAL:"].copy()
+op_hours = st.slider("Operating hrs / day", 8, 24, 12)
+if st.checkbox("Use 24-hr capacity", value=False):
+    op_hours = 24
 
-    opex = fin["ACTUAL OPEX (JAN-JUN)"].copy()
-    opex.columns = ["CPO","ElecJan","ElecFeb","ElecMar","ElecApr","ElecMay","ElecJun",
-                    "RentJan","RentFeb","RentMar","RentApr","RentMay","RentJun","Remarks"]
-    opex = opex[opex["CPO"].notna() & (opex["CPO"] != "CPO") & (opex["CPO"] != "CPO - JV")].copy()
+# Target utilization: ONE network-wide target in Company/Ops view
+# (applies uniformly when comparing all selected stations), or a
+# target PER STATION in Host Partner view — each station's slider
+# keeps its own remembered value (via its own widget key) when you
+# switch between sites, rather than sharing one global setting.
+#
+# Range and default reflect published EV charger utilization
+# benchmarks, not an assumption of high usage: public charger
+# utilization typically sits at 5–15%, McKinsey cites ~15% as the
+# threshold for economic viability, and even the most mature EU
+# markets peak around 30%. Source: Topal, O. (2025), "A comprehensive
+# analysis of capacity utilization rates of fast-charging stations in
+# shopping malls," Int J Low-Carbon Tech, 20, 1646–1660.
+# https://doi.org/10.1093/ijlct/ctaf100
+if is_company:
+    target_util = st.slider("Network Target Utilization %", 1, 40, 15,
+                            key="target_network")
+else:
+    station_key = sel_stations[0]
+    target_util = st.slider(
+        f"Target Utilization % — {station_key[:22]}", 1, 40, 15,
+        key=f"target_station_{station_key}")
+st.caption("📚 Range reflects published benchmarks: public EV chargers "
+          "typically run 5–15% utilization; ~15% is the threshold "
+          "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
 
-    fees = fin["FEES AND ASSUMPTIONS"].dropna(subset=["CPO"]).copy()
-    fees = fees[fees["CPO"] != "CPO - JV"].copy()
-
-    # CAPEX sheet — needed for payback calculations, not previously loaded
-    capex = fin["CAPEX"][["SITES","TOTAL CAPEX"]].dropna(subset=["SITES"]).copy()
-    capex.columns = ["STATIONNAME","TOTAL_CAPEX"]
-    capex = capex[~capex["STATIONNAME"].isin(["CPO"])].copy()
-
-    # Payback can only be computed for stations whose Financials-workbook
-    # name actually matches a real STATIONNAME in the session data — most
-    # CPO entries in the workbook do NOT correspond to a station with any
-    # transaction history at all (separate business entities, or simply
-    # not represented in Session Logs).
-    tx_station_set = set(tx["STATIONNAME"].dropna().unique())
-    fin_costs = fin_overall[["CPO","ActualElecCost","ActualRent"]].rename(
-        columns={"CPO":"STATIONNAME"})
-    payback_ref = capex.merge(fin_costs, on="STATIONNAME", how="inner")
-    payback_ref = payback_ref[payback_ref["STATIONNAME"].isin(tx_station_set)].copy()
-    payback_ref = payback_ref[payback_ref["TOTAL_CAPEX"] > 0].copy()  # exclude stations with no recorded investment
-
-    return (tx, cp, cp_cap, sp, ud, wt, fin_overall, opex, fees, capex, payback_ref,
-            cp_excluded_count, dur_excluded_count)
-
-(tx, cp, cp_cap, sp, ud, wt, fin_overall, opex_df, fees_df, capex_df, payback_ref,
- cp_excluded_count, dur_excluded_count) = load_all(
-    file_bytes["transactions"], file_bytes["charge_points"], file_bytes["station_profile"],
-    file_bytes["user_details"], file_bytes["wallet_txn"], file_bytes["financials"]
-
-)
-
-# ── SIDEBAR FILTERS ──────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## ⚡ Project ChargeIQ")
-    if st.button("🔄 Change data source", use_container_width=True):
-        st.session_state.chargeiq_data_ready = False
-        st.session_state.chargeiq_file_bytes = {}
-        st.rerun()
-    st.markdown("---")
-    st.markdown("### Filters")
-    view = st.radio("Dashboard View",
-                    ["🏢  Company / Ops", "🏪  Host Partner Site"])
-    is_company = view.startswith("🏢")
-
-    all_stations = sorted(tx["STATIONNAME"].dropna().unique().tolist())
-
-    if is_company:
-        sel_stations = st.multiselect("Stations", all_stations, default=all_stations[:10])
-        if not sel_stations:
-            sel_stations = all_stations
-    else:
-        sel_station  = st.selectbox("Site", all_stations, index=0)
-        sel_stations = [sel_station]
-
-    all_months    = sorted(tx["MONTH"].dropna().unique().tolist(), reverse=True)
-    month_labels  = [str(m) for m in all_months]
-    sel_month_lbl = st.selectbox("Month", month_labels, index=0)
-    sel_month     = all_months[month_labels.index(sel_month_lbl)]
-
-    charge_types = st.multiselect("Charge Type",
-        tx["CHARGE_TYPE"].dropna().unique().tolist(),
-        default=tx["CHARGE_TYPE"].dropna().unique().tolist())
-
-    op_hours = st.slider("Operating hrs / day", 8, 24, 12)
-    if st.checkbox("Use 24-hr capacity", value=False):
-        op_hours = 24
-
-    # Target utilization: ONE network-wide target in Company/Ops view
-    # (applies uniformly when comparing all selected stations), or a
-    # target PER STATION in Host Partner view — each station's slider
-    # keeps its own remembered value (via its own widget key) when you
-    # switch between sites, rather than sharing one global setting.
-    #
-    # Range and default reflect published EV charger utilization
-    # benchmarks, not an assumption of high usage: public charger
-    # utilization typically sits at 5–15%, McKinsey cites ~15% as the
-    # threshold for economic viability, and even the most mature EU
-    # markets peak around 30%. Source: Topal, O. (2025), "A comprehensive
-    # analysis of capacity utilization rates of fast-charging stations in
-    # shopping malls," Int J Low-Carbon Tech, 20, 1646–1660.
-    # https://doi.org/10.1093/ijlct/ctaf100
-    if is_company:
-        target_util = st.slider("Network Target Utilization %", 1, 40, 15,
-                                key="target_network")
-    else:
-        station_key = sel_stations[0]
-        target_util = st.slider(
-            f"Target Utilization % — {station_key[:22]}", 1, 40, 15,
-            key=f"target_station_{station_key}")
-    st.caption("📚 Range reflects published benchmarks: public EV chargers "
-              "typically run 5–15% utilization; ~15% is the threshold "
-              "commonly cited for economic viability ([source](https://doi.org/10.1093/ijlct/ctaf100)).")
-
-    st.markdown("---")
-    days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
-    n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
-    src_label = "Bundled data" if n_uploaded == 0 else f"{n_uploaded}/6 files uploaded"
-    st.markdown(f"<small style='color:#FFF4EC'>Period: **{sel_month}**<br>"
-                f"Active days: **{days_in_month}**<br>"
-                f"Source: {src_label}</small>",
-                unsafe_allow_html=True)
+st.markdown("---")
+days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
+n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
+src_label = "Bundled data" if n_uploaded == 0 else f"{n_uploaded}/6 files uploaded"
+st.markdown(f"<small style='color:#FFF4EC'>Period: **{sel_month}**<br>"
+            f"Active days: **{days_in_month}**<br>"
+            f"Source: {src_label}</small>",
+            unsafe_allow_html=True)
 
 # ── FILTER ─────────────────────────────────────────────────────────────────
 days = max(days_in_month, 1)

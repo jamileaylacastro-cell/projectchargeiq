@@ -3,7 +3,7 @@ import io
 import numpy as np
 
 
-def load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
+def load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, tx_excluded_b=None):
     """Load and clean dashboard datasets from raw uploaded bytes."""
     try:
         tx = pd.read_excel(io.BytesIO(tx_b))
@@ -12,6 +12,27 @@ def load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b):
             tx = pd.read_csv(io.BytesIO(tx_b))
         except Exception as e:
             raise ValueError(f"Failed to parse transactions file as Excel or CSV: {e}")
+
+    if tx_excluded_b is not None:
+        try:
+            tx_excluded = pd.read_excel(io.BytesIO(tx_excluded_b))
+        except Exception:
+            try:
+                tx_excluded = pd.read_csv(io.BytesIO(tx_excluded_b))
+            except Exception as e:
+                raise ValueError(f"Failed to parse excluded transactions file as Excel or CSV: {e}")
+
+        if not tx_excluded.empty:
+            common_cols = [c for c in tx_excluded.columns if c in tx.columns]
+            if common_cols:
+                tx = tx.merge(
+                    tx_excluded[common_cols].drop_duplicates(),
+                    on=common_cols,
+                    how="left",
+                    indicator=True,
+                )
+                tx = tx[tx["_merge"] == "left_only"].copy()
+                tx = tx.drop(columns=["_merge"])
 
     cp = pd.read_excel(io.BytesIO(cp_b))
     sp = pd.read_excel(io.BytesIO(sp_b))
