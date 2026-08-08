@@ -678,6 +678,62 @@ else:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── UTILIZATION TREND — daily line across the full available date range,
+#    not just the selected month (closes the "trends by time period" gap).
+#    Company view aggregates across the selected stations; Host Partner
+#    view is naturally single-station since sel_stations has one entry.
+st.markdown("<div class='sec-hdr'>📈 Utilization Trend</div>", unsafe_allow_html=True)
+ 
+_trend_base = tx[
+    (tx["STATIONNAME"].isin(sel_stations)) &
+    (tx["CHARGE_TYPE"].isin(charge_types)) &
+    (~tx["ISERROR"].astype(bool))
+].copy()
+ 
+if len(_trend_base):
+    _daily_kwh = _trend_base.groupby("DATE")["ENERGY_KWH"].sum()
+    # Same connector set used for the KPI-row denominator, held constant
+    # across the trend (a station's connector count rarely changes day to
+    # day within the data we have — this avoids a misleading capacity
+    # figure driven by an accidental gap in Charge Point Info coverage).
+    _trend_cap_kwh = cp_sel_online["CAPACITY_KW"].sum() * op_hours
+    _daily_util = (_daily_kwh / _trend_cap_kwh * 100).round(1) if _trend_cap_kwh > 0 else _daily_kwh * 0
+    _trend_df = _daily_util.reset_index()
+    _trend_df.columns = ["Date", "Utilization %"]
+    _trend_df = _trend_df.sort_values("Date")
+
+    # Chart-specific window selector (defaults to the full year of the
+    # currently selected month). Options: Last month (selected month),
+    # Last 3 months (selected + 2 prior months), Full year (calendar year).
+    trend_window = st.radio("Trend window",
+                            ["Last month", "Last 3 months", "Full year"],
+                            index=2, horizontal=True, key="trend_window")
+
+    # Compute start/end dates based on the selected window and the
+    # `sel_month` Period selected in the sidebar filters.
+    if trend_window == "Full year":
+        start = pd.Timestamp(year=int(sel_month.year), month=1, day=1).date()
+        end = pd.Timestamp(year=int(sel_month.year), month=12, day=31).date()
+    elif trend_window == "Last 3 months":
+        start_period = sel_month - 2
+        start = start_period.to_timestamp(how="start").date()
+        end = sel_month.to_timestamp(how="end").date()
+    else:  # Last month
+        start = sel_month.to_timestamp(how="start").date()
+        end = sel_month.to_timestamp(how="end").date()
+
+    _trend_plot = _trend_df[(_trend_df["Date"] >= start) & (_trend_df["Date"] <= end)].copy()
+    if len(_trend_plot) == 0:
+        st.info("No sessions in the selected trend window for the current station/charge-type selection.")
+    else:
+        st.line_chart(_trend_plot.set_index("Date"), color="#BEFF6C", height=260)
+        st.caption(
+            f"Showing {trend_window} — {start} to {end} ({len(_trend_plot):,} days). "
+            f"Full data range: {_trend_df['Date'].min()} to {_trend_df['Date'].max()}. "
+            f"Capacity denominator uses the current Operating hrs/day setting; connector set held constant.")
+else:
+    st.info("No sessions match the current station/charge-type selection to plot a trend.")
+
 # ── MAP DATA (built for both views — the Site Performance table below needs
 #    it regardless of whether the map itself is shown) ─────────────────────
 station_rows = []
@@ -797,17 +853,25 @@ if is_company:
 
 # ── CHARTS ──────────────────────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>Session & Energy Analysis</div>", unsafe_allow_html=True)
-c1,c2,c3 = st.columns(3)
+c1,c2,c3,c4 = st.columns(4)
 with c1:
     st.markdown("**Sessions by Hour of Day**")
     h = df.groupby("HOUR").size().reset_index(name="Sessions")
     if len(h): st.bar_chart(h.set_index("HOUR"), color="#BEFF6C", height=200)
 with c2:
+    st.markdown("**Sessions by Day of Week**")
+    _dow_order = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+    dow = df.copy()
+    dow["DOW"] = pd.Categorical(dow["STARTTIME"].dt.strftime("%a"),
+                                categories=_dow_order, ordered=True)
+    dow_ct = dow.groupby("DOW", observed=False).size().reset_index(name="Sessions")
+    if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW"), color="#BEFF6C", height=200)
+with c3:
     st.markdown("**Energy (kWh) by Charge Type**")
     ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
     ct.columns = ["Charge Type","kWh"]
     if len(ct): st.bar_chart(ct.set_index("Charge Type"), color="#BEFF6C", height=200)
-with c3:
+with c4:
     st.markdown("**Payment Method Mix**")
     pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
     if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
@@ -845,6 +909,37 @@ if len(map_df):
     </div>
     """, unsafe_allow_html=True)
 
+# ── PER-CHARGER ERROR RATE RANKING ───────────────────────────────────────────
+st.markdown("<div class='sec-hdr'>⚠️ Charger Error Rate Ranking</div>", unsafe_allow_html=True)
+ 
+_err_scope = df_all[df_all["STATIONNAME"].isin(sel_stations)]
+if len(_err_scope) and "CHARGER_ID" in _err_scope.columns:
+    _cp_err = _err_scope.groupby("CHARGER_ID").agg(
+        Sessions=("SESSION_ID", "count") if "SESSION_ID" in _err_scope.columns else ("ISERROR", "count"),
+        Errors=("ISERROR", lambda x: x.astype(bool).sum()),
+    ).reset_index()
+    _cp_err["Error Rate %"] = (_cp_err["Errors"] / _cp_err["Sessions"] * 100).round(1)
+    _cp_err = _cp_err[_cp_err["Sessions"] >= 3]  # drop chargers with too few sessions to be meaningful
+    _cp_err = _cp_err.sort_values("Error Rate %", ascending=False).head(10)
+ 
+    if len(_cp_err) == 0:
+        st.info("No chargers in the current selection have enough sessions (≥3) this period to rank.")
+    else:
+        st.caption("Top 10 chargers by error rate this period (min. 3 sessions) — a maintenance "
+                  "dispatch list, not just a network-wide percentage.")
+        for _, r in _cp_err.iterrows():
+            rate = r["Error Rate %"]
+            bc = "#C1443E" if rate > 10 else ("#A8710A" if rate > 5 else "#BEFF6C")
+            st.markdown(
+                f"<div style='margin-bottom:7px'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:11px;color:#000'>"
+                f"<b>{r['CHARGER_ID']}</b><span>{rate:.1f}% ({int(r['Errors'])}/{int(r['Sessions'])})</span></div>"
+                f"<div style='background:#EAE0D0;border-radius:2px;height:8px;overflow:hidden'>"
+                f"<div style='width:{min(rate,100)}%;height:100%;background:{bc};border-radius:2px'></div></div>"
+                f"</div>", unsafe_allow_html=True)
+else:
+    st.info("No CHARGER_ID data available for the current selection.")
+
 # ── FINANCIALS (CPO breakdown table — network-wide, Company view only) ──────
 if is_company:
     st.markdown("<div class='sec-hdr'>💰 Financials — Revenue & Operating Costs by CPO (Jan–Jun 2026)</div>",
@@ -867,19 +962,76 @@ if is_company:
 # ── USER SEGMENTS (charts — Company view only) ───────────────────────────────
 if is_company:
     st.markdown("<div class='sec-hdr'>👤 User Segments</div>", unsafe_allow_html=True)
-    br1,br2 = st.columns(2)
-    with br1:
-        st.markdown("**Car Brand Distribution (Top 10)**")
-        if "CARBRAND" in ud.columns:
-            brands = ud["CARBRAND"].value_counts().head(10).reset_index()
-            brands.columns = ["Brand","Users"]
-            st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
-    with br2:
-        st.markdown("**Plug Type Distribution**")
-        if "PLUG_TYPE" in ud.columns:
-            plugs = ud["PLUG_TYPE"].value_counts().reset_index()
-            plugs.columns = ["Plug Type","Users"]
-            st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
+ 
+    # UserDetails has no STATIONNAME/MONTH/CHARGE_TYPE of its own (it's a
+    # user-level table, not a session-level one), so "respecting the
+    # filters" means scoping down to only the users who actually appear
+    # in the already-filtered session data (df) — i.e. users who charged
+    # at the selected station(s), in the selected month, with the
+    # selected charge type.
+    _filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
+    ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
+ 
+    st.caption(f"📋 Scoped to the {len(ud_scoped):,} users with at least one matching session "
+              f"under the current filters — not all {len(ud):,} registered users.")
+ 
+    if len(ud_scoped) == 0:
+        st.info("No users match the current filter selection.")
+    else:
+        br1,br2 = st.columns(2)
+        with br1:
+            st.markdown("**Car Brand Distribution (Top 10)**")
+            if "CARBRAND" in ud_scoped.columns:
+                brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
+                brands.columns = ["Brand","Users"]
+                st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
+        with br2:
+            st.markdown("**Plug Type Distribution**")
+            if "PLUG_TYPE" in ud_scoped.columns:
+                plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
+                plugs.columns = ["Plug Type","Users"]
+                st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
+
+# ── WALLET TOP-UP BEHAVIOR ────────────────────────────────────────────────────
+st.markdown("<div class='sec-hdr'>💳 Wallet Top-Up Behavior</div>", unsafe_allow_html=True)
+ 
+_has_type = "TRANSACTION_TYPE" in wt.columns
+_has_status = "STATUS" in wt.columns
+ 
+if not _has_type:
+    st.info("`TRANSACTION_TYPE` column not found in walletTransactions.xlsx — can't isolate top-ups from other transaction types.")
+else:
+    _topups = wt[wt["TRANSACTION_TYPE"] == "Wallet Top up"].copy()
+    if _has_status:
+        _topups = _topups[_topups["STATUS"] == "Completed"]
+ 
+    if not is_company:
+        # Scope to users who actually transacted at this station this period,
+        # same join pattern as User Segments — wallet data has no
+        # STATIONNAME of its own since a top-up isn't tied to a location.
+        _wallet_user_ids = set(df["USERID"].dropna().astype(float).unique())
+        _topups = _topups[_topups["USERID"].astype(float).isin(_wallet_user_ids)]
+        st.caption(f"📋 Scoped to top-ups made by the {len(_wallet_user_ids):,} users with a "
+                  f"matching session at this station this period — wallet transactions have "
+                  f"no station of their own.")
+ 
+    if len(_topups) == 0:
+        st.info("No completed top-up transactions match the current selection.")
+    else:
+        wc1, wc2, wc3, wc4 = st.columns(4)
+        _avg_topup = _topups["AMOUNT"].mean()
+        _med_topup = _topups["AMOUNT"].median()
+        _n_topups  = len(_topups)
+        _n_topup_users = _topups["USERID"].nunique()
+        kpi(wc1, "Avg Top-Up Amount", f"₱{_avg_topup:,.0f}", f"Median: ₱{_med_topup:,.0f}", "up", "#BEFF6C")
+        kpi(wc2, "Total Top-Ups", f"{_n_topups:,}", f"{_n_topup_users:,} unique users", "up", "#BEFF6C")
+        kpi(wc3, "Top-Ups per User", f"{(_n_topups/_n_topup_users):.1f}" if _n_topup_users else "—",
+            "Avg completed top-ups per user", "up", "#000000")
+        if "PAYMENT_METHOD" in _topups.columns and len(_topups):
+            _top_method = _topups["PAYMENT_METHOD"].value_counts().index[0]
+            kpi(wc4, "Top Funding Method", _top_method, "Most used for top-ups", "up", "#000000")
+        else:
+            kpi(wc4, "Top Funding Method", "—", "PAYMENT_METHOD not found", "warn", "#A8710A")
 
 # ── SITE PAYBACK TRACKER — Host Partner Site view only ──────────────────────
 if not is_company:
