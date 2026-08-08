@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pydeck as pdk
+import altair as alt
 import io
+import calendar
 from pathlib import Path
 from utils.cleaning_dashboard import load_dashboard_data
 
@@ -289,7 +291,7 @@ with st.sidebar:
     sel_month_lbl = st.selectbox("Month", month_labels, index=0)
     sel_month     = all_months[month_labels.index(sel_month_lbl)]
 
-    charge_types = st.multiselect("Charge Type",
+    charge_types = st.multiselect("Charging Mode",
         tx["CHARGE_TYPE"].dropna().unique().tolist(),
         default=tx["CHARGE_TYPE"].dropna().unique().tolist())
 
@@ -726,7 +728,24 @@ if len(_trend_base):
     if len(_trend_plot) == 0:
         st.info("No sessions in the selected trend window for the current station/charge-type selection.")
     else:
-        st.line_chart(_trend_plot.set_index("Date"), color="#BEFF6C", height=260)
+        _trend_plot = _trend_plot.assign(
+            Month=_trend_plot["Date"].apply(lambda d: d.replace(day=1))
+        )
+        month_breaks = _trend_plot["Month"].drop_duplicates().sort_values().tolist()
+
+        line = alt.Chart(_trend_plot).mark_line(color="#BEFF6C", strokeWidth=3).encode(
+            x=alt.X("Date:T", title="Date"),
+            y=alt.Y("Utilization %:Q", title="Utilization %"),
+            tooltip=[alt.Tooltip("Date:T", title="Date"),
+                     alt.Tooltip("Utilization %:Q", title="Utilization %")]
+        )
+
+        rules = alt.Chart(pd.DataFrame({"Date": month_breaks})).mark_rule(color="#A1A1A1", strokeDash=[4,4]).encode(
+            x="Date:T"
+        )
+
+        chart = alt.layer(line, rules).resolve_scale(y="shared").properties(height=280)
+        st.altair_chart(chart, use_container_width=True)
         st.caption(
             f"Showing {trend_window} — {start} to {end} ({len(_trend_plot):,} days). "
             f"Full data range: {_trend_df['Date'].min()} to {_trend_df['Date'].max()}. "
@@ -853,25 +872,47 @@ if is_company:
 
 # ── CHARTS ──────────────────────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>Session & Energy Analysis</div>", unsafe_allow_html=True)
-c1,c2,c3,c4 = st.columns(4)
-with c1:
-    st.markdown("**Sessions by Hour of Day**")
+
+st.markdown("<div class='row-hdr'>Session Timing</div>", unsafe_allow_html=True)
+t1,t2 = st.columns(2)
+with t1:
+    st.markdown("**Avg Sessions by Hour of Day**")
     h = df.groupby("HOUR").size().reset_index(name="Sessions")
+     # Raw totals accumulate across every day in the selected month (hour 8
+    # would sum ~30 days' worth of 8am sessions) — divide by the number of
+    # days in the period (same `days` used for the capacity denominator
+    # elsewhere) so this reads as "typical sessions at this hour," not a
+    # monthly total that's bigger just because the month is longer.
+    h["Sessions"] = (h["Sessions"] / days).round(1)
     if len(h): st.bar_chart(h.set_index("HOUR"), color="#BEFF6C", height=200)
-with c2:
-    st.markdown("**Sessions by Day of Week**")
+with t2:
+    st.markdown("**Avg Sessions by Day of Week**")
     _dow_order = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
     dow = df.copy()
     dow["DOW"] = pd.Categorical(dow["STARTTIME"].dt.strftime("%a"),
                                 categories=_dow_order, ordered=True)
     dow_ct = dow.groupby("DOW", observed=False).size().reset_index(name="Sessions")
-    if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW"), color="#BEFF6C", height=200)
-with c3:
-    st.markdown("**Energy (kWh) by Charge Type**")
+    # Months don't have equal counts of each weekday (a 31-day month can
+    # have 5 Saturdays but only 4 Tuesdays) — dividing by raw session
+    # totals alone would inflate whichever weekday happens to occur one
+    # extra time, independent of actual demand. Use the TRUE calendar
+    # count of each weekday within the selected month as the denominator.
+    _y, _m = sel_month.year, sel_month.month
+    _n_days_calendar = calendar.monthrange(_y, _m)[1]
+    _month_dates = pd.date_range(start=f"{_y}-{_m:02d}-01", periods=_n_days_calendar, freq="D")
+    _dow_occurrences = pd.Series(_month_dates.strftime("%a")).value_counts()
+    dow_ct["Occurrences"] = dow_ct["DOW"].astype(str).map(_dow_occurrences).fillna(1)
+    dow_ct["Sessions"] = (dow_ct["Sessions"] / dow_ct["Occurrences"]).round(1)
+    if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW")[["Sessions"]], color="#BEFF6C", height=200)
+
+st.markdown("<div class='row-hdr'>Charging Behavior</div>", unsafe_allow_html=True)
+b1,b2 = st.columns(2)
+with b1:
+    st.markdown("**Energy (kWh) by Charging Mode**")
     ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
-    ct.columns = ["Charge Type","kWh"]
-    if len(ct): st.bar_chart(ct.set_index("Charge Type"), color="#BEFF6C", height=200)
-with c4:
+    ct.columns = ["Charging Mode","kWh"]
+    if len(ct): st.bar_chart(ct.set_index("Charging Mode"), color="#BEFF6C", height=200)
+with b2:
     st.markdown("**Payment Method Mix**")
     pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
     if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
