@@ -402,3 +402,61 @@ with tab_forecast:
         )
     else:
         st.info("Click **Generate forecast** to project future demand for this station.")
+
+# ── Dashboard Utilization Reference ─────────────────────────────────────────
+if "chargeiq_file_bytes" in st.session_state:
+    dashboard_files = st.session_state.chargeiq_file_bytes
+    cp_bytes = dashboard_files.get("charge_points")
+    sp_bytes = dashboard_files.get("station_profile")
+    if cp_bytes is not None and sp_bytes is not None:
+        try:
+            cp_ref = pd.read_excel(io.BytesIO(cp_bytes))
+            sp_ref = pd.read_excel(io.BytesIO(sp_bytes))
+        except Exception:
+            cp_ref = None
+            sp_ref = None
+        if cp_ref is not None and sp_ref is not None:
+            station_cp = cp_ref[cp_ref["STATIONNAME"] == selected_station]
+            station_sp = sp_ref[sp_ref["STATIONNAME"] == selected_station]
+            if len(station_cp) and len(station_sp):
+                online_capacity = station_cp[station_cp["NETWORK_STATUS"] == "Online"]["CAPACITY_KW"].sum()
+                def _parse_time_minutes(val):
+                    if pd.isna(val) or str(val).strip() == "":
+                        return None
+                    parsed = pd.to_datetime(str(val), errors="coerce")
+                    return parsed.hour * 60 + parsed.minute if pd.notna(parsed) else None
+                b_start = _parse_time_minutes(station_sp["BUSINESS_START"].iloc[0])
+                b_end = _parse_time_minutes(station_sp["BUSINESS_END"].iloc[0])
+                if b_start is not None and b_end is not None and b_start != b_end:
+                    hours = (b_end - b_start) / 60
+                    if hours <= 0:
+                        hours += 24
+                    capacity_kwh_per_day = online_capacity * hours
+                    if capacity_kwh_per_day > 0:
+                        util_series = daily_series / capacity_kwh_per_day * 100
+                        util_fig = go.Figure()
+                        util_fig.add_trace(go.Scatter(x=util_series.index, y=util_series,
+                                                      mode="lines", line=dict(color=ACCENT, width=2),
+                                                      name="Utilization %"))
+                        util_fig.update_layout(title=f"Utilization Trend reference — {selected_station}",
+                                               yaxis_title="Utilization %",
+                                               xaxis_title="Date")
+                        st.markdown("---")
+                        st.markdown("### Dashboard Utilization Reference")
+                        st.plotly_chart(plotly_base_layout(util_fig, height=320), use_container_width=True)
+                        st.caption(
+                            "This reference chart uses the dashboard's station profile and charge point "
+                            "data to translate the selected site's daily kWh into an estimated daily utilization rate."
+                        )
+                    else:
+                        st.info("Cannot compute utilization reference: selected station has no online capacity in the dashboard charge point data.")
+                else:
+                    st.info("Cannot compute utilization reference: selected station has invalid or missing business hours in the dashboard station profile.")
+            else:
+                st.info("Dashboard station profile / charge point data is available, but not for the selected station.")
+        else:
+            st.info("Dashboard station profile or charge point workbook could not be parsed for the utilization reference.")
+    else:
+        st.info("Load the dashboard's Station Profile and Charge Point information files for the utilization reference chart.")
+else:
+    st.info("Dashboard upload state is not available; the utilization reference chart requires the shared dashboard files.")
