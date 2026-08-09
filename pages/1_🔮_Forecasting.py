@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import io
 
 from utils.cleaning import clean_and_aggregate
 from utils.models import run_backtest, run_forward_forecast
@@ -138,6 +139,15 @@ header_row = st.sidebar.number_input(
          "has headers on the first row (0), so that's the default — adjust if a future "
          "export shifts them.",
 )
+
+# Automatically reuse the dashboard's uploaded transactions file when available.
+dashboard_tx_bytes = None
+if "chargeiq_file_bytes" in st.session_state:
+    dashboard_tx_bytes = st.session_state.chargeiq_file_bytes.get("transactions")
+
+if uploaded is None and dashboard_tx_bytes is not None:
+    st.sidebar.info("No forecasting upload detected — using the dashboard's uploaded transactions file.")
+    uploaded = io.BytesIO(dashboard_tx_bytes)
 
 if uploaded is None:
     st.sidebar.info("Upload the station monitoring workbook to get started.")
