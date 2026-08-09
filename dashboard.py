@@ -279,7 +279,7 @@ with st.sidebar:
     all_stations = sorted(tx["STATIONNAME"].dropna().unique().tolist())
 
     if is_company:
-        sel_stations = st.multiselect("Stations", all_stations, default=all_stations[:10])
+        sel_stations = st.multiselect("Stations", all_stations, default=all_stations)
         if not sel_stations:
             sel_stations = all_stations
     else:
@@ -295,9 +295,14 @@ with st.sidebar:
         tx["CHARGE_TYPE"].dropna().unique().tolist(),
         default=tx["CHARGE_TYPE"].dropna().unique().tolist())
 
-    op_hours = st.slider("Operating hrs / day", 8, 24, 12)
-    if st.checkbox("Use 24-hr capacity", value=False):
-        op_hours = 24
+    op_hours_fallback = st.slider(
+        "Fallback operating hrs/day", 8, 24, 12,
+        help="Only used for a station with missing or invalid Business Hours "
+             "on file (e.g. identical start/end time) — real per-station hours "
+             "from Station Profile are used wherever available.")
+    force_24 = st.checkbox("Use 24-hr capacity for all stations", value=False,
+                           help="Overrides real business hours for every station "
+                                "— useful for a 'what if we were open 24/7' scenario.")
 
     # Target utilization: ONE network-wide target in Company/Ops view
     # (applies uniformly when comparing all selected stations), or a
@@ -338,6 +343,42 @@ st.markdown(f"<small style='color:#FFF4EC'>Period: **{sel_month}**<br>"
             f"Source: {src_label}</small>",
             unsafe_allow_html=True)
 
+# ── PER-STATION OPERATING HOURS ─────────────────────────────────────────────
+# Real business hours from Station Profile, not one manual number applied
+# uniformly to every station — a mall at 10am-10pm and a 24-hr highway
+# stop have very different real capacity, and a single flat multiplier
+# for both systematically skews utilization % for whichever type is
+# "wrong" for that station.
+def _parse_time_minutes(val):
+    if pd.isna(val) or str(val).strip() == "":
+        return None
+    parsed = pd.to_datetime(str(val), errors="coerce")
+    return parsed.hour * 60 + parsed.minute if pd.notna(parsed) else None
+ 
+def _station_daily_hours(station_name):
+    """Returns (hours, used_fallback)."""
+    if force_24:
+        return 24.0, False
+    row = sp[sp["STATIONNAME"] == station_name]
+    if len(row) == 0 or "BUSINESS_START" not in row.columns or "BUSINESS_END" not in row.columns:
+        return float(op_hours_fallback), True
+    b_start = _parse_time_minutes(row["BUSINESS_START"].iloc[0])
+    b_end   = _parse_time_minutes(row["BUSINESS_END"].iloc[0])
+    if b_start is None or b_end is None or b_start == b_end:
+        # Missing data, or identical start/end time — a known placeholder
+        # pattern in this data (roughly 1 in 3 stations), not a real
+        # 0-hour site. Fall back rather than propagate a 0-hour capacity
+        # that would break utilization % (division by zero) downstream.
+        return float(op_hours_fallback), True
+    hrs = (b_end - b_start) / 60
+    if hrs <= 0:
+        hrs += 24  # overnight wraparound — end time is technically after midnight
+    return round(hrs, 2), False
+ 
+_station_hours_results = {s: _station_daily_hours(s) for s in tx["STATIONNAME"].dropna().unique()}
+station_hours   = {s: v[0] for s, v in _station_hours_results.items()}
+_uses_fallback  = {s for s, v in _station_hours_results.items() if v[1]}
+
 # ── FILTER ─────────────────────────────────────────────────────────────────
 days = max(days_in_month, 1)
 
@@ -367,7 +408,18 @@ df_prior = tx[
 cp_sel = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations)]
 # Only ONLINE connectors contribute real, usable capacity for the period
 cp_sel_online = cp_sel[cp_sel["NETWORK_STATUS"] == "Online"]
-total_avail_kwh = cp_sel_online["CAPACITY_KW"].sum() * op_hours * days
+
+# Per-station capacity, using each station's OWN real operating hours —
+# summing capacity first and multiplying by one flat hours figure (the
+# old approach) is only valid if every station has identical hours, which
+# they don't.
+total_avail_kwh = sum(
+    cp_sel_online[cp_sel_online["STATIONNAME"] == s]["CAPACITY_KW"].sum()
+    * station_hours.get(s, op_hours_fallback) * days
+    for s in cp_sel_online["STATIONNAME"].unique()
+)
+#total_avail_kwh = cp_sel_online["CAPACITY_KW"].sum() * op_hours * days
+
 actual_kwh      = df["ENERGY_KWH"].sum()
 prior_kwh       = df_prior["ENERGY_KWH"].sum()
 net_util        = (actual_kwh / total_avail_kwh * 100) if total_avail_kwh > 0 else 0
@@ -428,9 +480,15 @@ with col_ico:
                 unsafe_allow_html=True)
 with col_ttl:
     title = "Network Dashboard" if is_company else f"Site Dashboard — {sel_stations[0]}"
+    if is_company:
+        _hrs_label = f"{force_24 and '24' or 'per-station'} hrs/day"
+    else:
+        _hrs_label = f"{station_hours.get(sel_stations[0], op_hours_fallback):.1f}h/day"
+        if sel_stations[0] in _uses_fallback:
+            _hrs_label += " (fallback)"
     st.markdown(f"<h2 style='margin:0;color:#000000'>Project ChargeIQ — {title}</h2>"
                 f"<p style='margin:0;color:#5C574D;font-size:11px'>"
-                f"{sel_month} · {days} active days · Op hrs: {op_hours}h/day</p>",
+                f"{sel_month} · {days} active days · Op hrs: {_hrs_label}</p>",
                 unsafe_allow_html=True)
 st.markdown("---")
 
@@ -568,12 +626,20 @@ if not is_company:
 
 # ── FORMULA EXPANDER ────────────────────────────────────────────────────────
 with st.expander("📐 Energy-Based Utilization Formula", expanded=False):
+    if is_company:
+        _hrs_note = (f"× each station's OWN real Business Hours (Station Profile)"
+                    if not force_24 else "× 24 hrs/day (forced override)")
+    else:
+        _sh = station_hours.get(sel_stations[0], op_hours_fallback)
+        _hrs_note = f"× {_sh:.1f} hrs/day"
+        if sel_stations[0] in _uses_fallback:
+            _hrs_note += f" (fallback — no valid Business Hours on file for this station)"
+ 
     st.markdown(f"""<div class='formula-box'>
 Utilization Rate (%) = Σ Actual kWh Charged ÷ Total Available Capacity × 100
-
+ 
 Σ Actual kWh Charged     = {actual_kwh:,.1f} kWh  (ENERGY_KWH where ISERROR=0)
-Total Available Capacity = Online Connectors × CAPACITY_KW × {op_hours} hrs/day × {days} days
-                         = {online_cps} online connectors × {op_hours} hrs × {days} days
+Total Available Capacity = Σ per station [ Online Connectors × CAPACITY_KW {_hrs_note} × {days} days ]
                          = {total_avail_kwh:,.0f} kWh
 Network Utilization      = {actual_kwh:,.1f} ÷ {total_avail_kwh:,.0f} × 100 = {net_util:.1f}%
 Gap vs {target_util}% target   = {util_gap:+.1f} pp
@@ -586,6 +652,15 @@ Gap vs {target_util}% target   = {util_gap:+.1f} pp
         f"of which {online_cps:,} are Online and count toward available capacity "
         f"({offline_cps:,} Offline, {faulty_cps:,} Faulty)."
     )
+    _n_fallback_selected = len([s for s in sel_stations if s in _uses_fallback])
+    if _n_fallback_selected > 0 and not force_24:
+        st.caption(
+            f"📋 **Operating hours data quality:** {_n_fallback_selected} of {len(sel_stations)} "
+            f"selected station(s) have missing or placeholder Business Hours on file "
+            f"(identical BUSINESS_START/BUSINESS_END is a known data gap affecting roughly "
+            f"1 in 3 stations) — the {op_hours_fallback}h/day fallback is used for those, "
+            f"real hours are used for the rest."
+        )
     if dur_excluded_count > 0:
         st.caption(
             f"📋 **Session duration data quality:** {dur_excluded_count:,} sessions network-wide "
@@ -605,8 +680,68 @@ def kpi(col, label, value, trend, tclass="up", border="#000000"):
 
 st.markdown("<div class='sec-hdr'>Key Performance Indicators</div>", unsafe_allow_html=True)
 
+# ── TOP PERFORMER LEADERBOARD — Company view, multiple stations only.
+#    "Best vs prior month" tells you if a station is improving; it says
+#    nothing about how it stacks up against its peers right now. This
+#    computes one headline number per selected station for each KPI
+#    section, so the section can call out whoever's leading — a smaller,
+#    purpose-built version of the same per-station math the map/table
+#    below does, kept separate to avoid touching that logic.
+_leaderboard = {}
+if is_company and len(sel_stations) > 1:
+    _lb_rows = []
+    for s in sel_stations:
+        s_df = df[df["STATIONNAME"] == s]
+        s_cp = cp_cap[cp_cap["STATIONNAME"] == s]
+        s_cp_online = s_cp[s_cp["NETWORK_STATUS"] == "Online"]
+        s_kwh = s_df["ENERGY_KWH"].sum()
+        s_avail = s_cp_online["CAPACITY_KW"].sum() * station_hours.get(s, op_hours_fallback) * days
+        s_util = (s_kwh / s_avail * 100) if s_avail > 0 else 0
+        s_uptime = (len(s_cp_online) / len(s_cp) * 100) if len(s_cp) > 0 else 0
+        s_rev = s_df["TOTALAMOUNT"].sum()
+        s_users = s_df["USERID"].dropna().nunique()
+        s_spu = s_df.groupby("USERID").size()
+        s_repeat = ((s_spu > 1).sum() / s_users * 100) if s_users > 0 else 0
+        _lb_rows.append({"station": s, "util": s_util, "uptime": s_uptime,
+                         "revenue": s_rev, "repeat": s_repeat, "users": s_users})
+    _lb_df = pd.DataFrame(_lb_rows)
+
+    def _top_performer(metric_col, min_users=0, fmt="{:.1f}%", round_dp=1):
+        pool = _lb_df[_lb_df["users"] >= min_users] if min_users else _lb_df
+        if len(pool) == 0 or pool[metric_col].max() <= 0:
+            return None
+        # Compare at the same precision the value is displayed at — two
+        # stations can differ by a tiny float fraction but still show as
+        # the identical number, and should count as tied rather than
+        # arbitrarily picking one as "the" winner.
+        rounded = pool[metric_col].round(round_dp)
+        max_val = rounded.max()
+        tied = pool.loc[rounded == max_val].sort_values(metric_col, ascending=False)
+        names = tied["station"].tolist()
+        top_val = tied[metric_col].iloc[0]
+        label = f"🏆 Top: {names[0]} ({fmt.format(top_val)})"
+        if len(names) == 2:
+            label += f" and {names[1]}"
+        elif len(names) > 2:
+            label += f" and {names[1]} +{len(names)-2} more"
+        return label
+
+    _leaderboard["util"]    = _top_performer("util")
+    _leaderboard["uptime"]  = _top_performer("uptime")
+    _leaderboard["revenue"] = _top_performer("revenue", fmt="₱{:,.0f}")
+    _leaderboard["repeat"]  = _top_performer("repeat", min_users=5)  # avoid a 1-user "100%" outlier
+
+def _row_hdr_with_leaderboard(title, key):
+    tag = _leaderboard.get(key) if is_company else None
+    if tag:
+        st.markdown(f"<div class='row-hdr'>{title} &nbsp;·&nbsp; "
+                    f"<span style='color:#4F7A1E;text-transform:none;font-weight:700'>{tag}</span></div>",
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='row-hdr'>{title}</div>", unsafe_allow_html=True)
+
 # ── ROW 1: UTILIZATION ───────────────────────────────────────────────────────
-st.markdown("<div class='row-hdr'>Utilization</div>", unsafe_allow_html=True)
+_row_hdr_with_leaderboard("Utilization", "util")
 r1c1,r1c2,r1c3,r1c4 = st.columns(4)
 gap_cls = "up" if util_gap >= 0 else ("warn" if util_gap >= -10 else "dn")
 kpi(r1c1,"Network Utilization",f"{net_util:.1f}%",
@@ -623,7 +758,7 @@ kpi(r1c4,"Total Sessions",f"{total_sess:,}",
     "up" if mom_sess>=0 else "dn","#BEFF6C")
 
 # ── ROW 2: RELIABILITY ───────────────────────────────────────────────────────
-st.markdown("<div class='row-hdr'>Reliability</div>", unsafe_allow_html=True)
+_row_hdr_with_leaderboard("Reliability", "uptime")
 r2c1,r2c2,r2c3,r2c4 = st.columns(4)
 kpi(r2c1,"Charger Uptime",f"{uptime_pct:.1f}%",
     f"{online_cps}/{total_cps} connectors online",
@@ -642,7 +777,7 @@ kpi(r2c4,"Error Session Rate",f"{error_rate:.1f}%",
     "dn" if error_rate>5 else "up","#C1443E" if error_rate>5 else "#BEFF6C")
 
 # ── ROW 3: REVENUE ───────────────────────────────────────────────────────────
-st.markdown("<div class='row-hdr'>Revenue</div>", unsafe_allow_html=True)
+_row_hdr_with_leaderboard("Revenue", "revenue")
 r3c1,r3c2,r3c3,r3c4 = st.columns(4)
 kpi(r3c1,"Total Revenue",f"₱{total_rev:,.0f}",
     f"{'▲' if mom_rev>=0 else '▼'} {abs(mom_rev):.1f}% MoM",
@@ -661,7 +796,7 @@ else:
         "OVERSTAYFEE column not found","warn","#A8710A")
 
 # ── ROW 4: CUSTOMER ──────────────────────────────────────────────────────────
-st.markdown("<div class='row-hdr'>Customer</div>", unsafe_allow_html=True)
+_row_hdr_with_leaderboard("Customer", "repeat")
 r4c1,r4c2,r4c3,r4c4 = st.columns(4)
 if is_company:
     kpi(r4c1,"Registered Users",f"{len(ud):,}",f"{active:,} active accounts","up","#000000")
@@ -679,6 +814,22 @@ else:
     kpi(r4c4,"Top Payment Method",top_pm,"Most used at this site","up","#000000")
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+# ── CUSTOMER ENGAGEMENT ──────────────────────────────────────────────────────
+# Only stats not already shown elsewhere: Repeat Rate lives in the Customer
+# KPI row above; Preferred charge type/plug and Peak Hour duplicate the
+# Charging Preferences and Session Timing sections below — dropped here to
+# avoid showing the same number twice under two different labels.
+st.markdown("<div class='sec-hdr'>Customer Engagement</div>", unsafe_allow_html=True)
+col1, col2, col3 = st.columns(3)
+col1.metric("Avg Session Duration (min)", f"{avg_dur:.0f}")
+col2.metric("Sessions / User (period)", f"{(sessions_per_user.mean() if len(sessions_per_user) else 0):.2f}")
+avg_kwh_session = (total_kwh:=df['ENERGY_KWH'].sum()) / total_sess if total_sess>0 else 0
+col3.metric("Avg kWh / Session", f"{avg_kwh_session:.2f}")
+st.caption("Repeat Customer Rate is in the Customer KPI row above; charging mode, plug, "
+          "and peak-hour patterns are in Session Timing and Charging Preferences below "
+          "— not repeated here.")
+
 
 # ── UTILIZATION TREND — daily line across the full available date range,
 #    not just the selected month (closes the "trends by time period" gap).
@@ -698,8 +849,14 @@ if len(_trend_base):
     # across the trend (a station's connector count rarely changes day to
     # day within the data we have — this avoids a misleading capacity
     # figure driven by an accidental gap in Charge Point Info coverage).
-    _trend_cap_kwh = cp_sel_online["CAPACITY_KW"].sum() * op_hours
-    _daily_util = (_daily_kwh / _trend_cap_kwh * 100).round(1) if _trend_cap_kwh > 0 else _daily_kwh * 0
+    # Per-day capacity uses each station's own real hours, same as the
+    # network-wide KPI above.
+    _trend_cap_kwh_per_day = sum(
+        cp_sel_online[cp_sel_online["STATIONNAME"] == s]["CAPACITY_KW"].sum()
+        * station_hours.get(s, op_hours_fallback)
+        for s in cp_sel_online["STATIONNAME"].unique()
+    )
+    _daily_util = (_daily_kwh / _trend_cap_kwh_per_day * 100).round(1) if _trend_cap_kwh_per_day > 0 else _daily_kwh * 0    
     _trend_df = _daily_util.reset_index()
     _trend_df.columns = ["Date", "Utilization %"]
     _trend_df = _trend_df.sort_values("Date")
@@ -762,7 +919,7 @@ for sname in sel_stations:
     s_all = df_all[df_all["STATIONNAME"] == sname]
     s_kwh  = s_df["ENERGY_KWH"].sum()
     s_cap  = s_cp[s_cp["NETWORK_STATUS"]=="Online"]["CAPACITY_KW"].sum()
-    s_avail = s_cap * op_hours * days
+    s_avail = s_cap * station_hours.get(sname, op_hours_fallback) * days
     s_util  = round(s_kwh / s_avail * 100, 1) if s_avail > 0 else 0
     s_rev   = s_df["TOTALAMOUNT"].sum()
     s_err   = round(s_all["ISERROR"].astype(bool).sum() / max(len(s_all),1)*100, 1)
@@ -905,8 +1062,8 @@ with t2:
     dow_ct["Sessions"] = (dow_ct["Sessions"] / dow_ct["Occurrences"]).round(1)
     if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW")[["Sessions"]], color="#BEFF6C", height=200)
 
-st.markdown("<div class='row-hdr'>Charging Behavior</div>", unsafe_allow_html=True)
-b1,b2 = st.columns(2)
+st.markdown("<div class='row-hdr'>Charging Preferences</div>", unsafe_allow_html=True)
+b1,b2,b3 = st.columns(3)
 with b1:
     st.markdown("**Energy (kWh) by Charging Mode**")
     ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
@@ -916,6 +1073,97 @@ with b2:
     st.markdown("**Payment Method Mix**")
     pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
     if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
+with b3:
+    st.markdown("**Power Supply Mode**")
+    # CHARGER_TYPE (AC/DC) — the physical hardware, joined from Charge
+    # Point Info via CHARGER_ID since Session Logs don't carry it
+    # directly. Genuinely different from "Charging Mode" above (which is
+    # how the customer configured the session, not the hardware) — this
+    # is what actually explains fast vs. slow Avg Session Duration.
+    _charger_type_map = cp_cap.groupby("CHARGER_ID")["CHARGER_TYPE"].first()
+    _df_psm = df.copy()
+    _df_psm["POWER_SUPPLY_MODE"] = _df_psm["CHARGER_ID"].map(_charger_type_map)
+    psm_ct = _df_psm.groupby("POWER_SUPPLY_MODE").size().reset_index(name="Sessions")
+    psm_ct = psm_ct[psm_ct["POWER_SUPPLY_MODE"].notna()]
+    if len(psm_ct):
+        st.bar_chart(psm_ct.set_index("POWER_SUPPLY_MODE"), color="#BEFF6C", height=200)
+        _psm_dur = _df_psm.groupby("POWER_SUPPLY_MODE")["DURATION_MIN"].mean()
+        _dur_bits = [f"{k}: {v:.0f} min avg" for k, v in _psm_dur.items() if pd.notna(v)]
+        if _dur_bits:
+            st.caption(" · ".join(_dur_bits) + f" — explains the {avg_dur:.0f} min network average above.")
+    else:
+        st.info("No Power Supply Mode data — CHARGER_TYPE not available for these chargers in "
+               "Charge Point Info.")
+
+# Anomaly check: a DC (fast) session taking as long as a typical AC
+# (slow) session, or an AC session charging at DC-like speed, suggests a
+# mislabeled charger, a hardware fault, or a data entry error — not
+# normal behavior. Thresholds come from the FULL network (a stable
+# baseline), not the current filter, so they don't drift if you filter
+# down to a single unusual station.
+_baseline = tx[(~tx["ISERROR"].astype(bool)) & tx["DURATION_MIN"].notna()].copy()
+_baseline["POWER_SUPPLY_MODE"] = _baseline["CHARGER_ID"].map(_charger_type_map)
+_ac_median_dur = _baseline.loc[_baseline["POWER_SUPPLY_MODE"]=="AC", "DURATION_MIN"].median()
+_dc_base = _baseline[_baseline["POWER_SUPPLY_MODE"]=="DC"].copy()
+_dc_base["RATE"] = _dc_base["ENERGY_KWH"] / _dc_base["DURATION_MIN"]
+_dc_median_rate = _dc_base["RATE"].median()
+
+_scope = _df_psm[_df_psm["DURATION_MIN"].notna()].copy()
+_scope["RATE"] = _scope["ENERGY_KWH"] / _scope["DURATION_MIN"]
+_dc_slow = (_scope[(_scope["POWER_SUPPLY_MODE"]=="DC") & (_scope["DURATION_MIN"] > _ac_median_dur)]
+           if pd.notna(_ac_median_dur) else _scope.iloc[0:0])
+_ac_fast = (_scope[(_scope["POWER_SUPPLY_MODE"]=="AC") & (_scope["RATE"] > _dc_median_rate*0.5)]
+           if pd.notna(_dc_median_rate) else _scope.iloc[0:0])
+_n_anom = len(_dc_slow) + len(_ac_fast)
+
+if _n_anom > 0:
+    st.markdown(
+        f"<div style='background:#FEF3DC;border-left:3px solid #A8710A;border-radius:4px;"
+        f"padding:8px 12px;margin-top:4px;font-size:11px;color:#000'>"
+        f"⚠️ <b>{_n_anom} anomal{'y' if _n_anom==1 else 'ies'} in current selection:</b> "
+        f"{len(_dc_slow)} DC session(s) took longer than a typical AC session "
+        f"(&gt;{_ac_median_dur:.0f} min) — possible mislabeled or underperforming fast charger; "
+        f"{len(_ac_fast)} AC session(s) charged at DC-like speed — possible mislabeled connector "
+        f"or data error.</div>", unsafe_allow_html=True
+    )
+    with st.expander(f"View the {min(_n_anom,20)} flagged sessions", expanded=False):
+        _flagged = pd.concat([
+            _dc_slow.assign(**{"Flag": "DC running slow"}),
+            _ac_fast.assign(**{"Flag": "AC running fast"}),
+        ]).sort_values("DURATION_MIN", ascending=False).head(20)
+        _flagged_display = _flagged[["STATIONNAME","CHARGER_ID","POWER_SUPPLY_MODE",
+                                     "DURATION_MIN","ENERGY_KWH","Flag"]].rename(columns={
+            "STATIONNAME":"Station","CHARGER_ID":"Charger","POWER_SUPPLY_MODE":"Type",
+            "DURATION_MIN":"Duration (min)","ENERGY_KWH":"kWh"})
+        st.dataframe(_flagged_display, use_container_width=True, hide_index=True)
+
+# Plug type / car brand come from UserDetails (a user-level table, not
+# session-level), so — same as before — scope to only the users with a
+# matching session under the current filters, and keep this pair
+# Company-view only (UserDetails has no per-station granularity to make
+# it meaningful for a single Host Partner site).
+if is_company:
+    _filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
+    ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
+    st.caption(f"📋 Plug type & car brand below scoped to the {len(ud_scoped):,} users with at "
+              f"least one matching session under the current filters — not all {len(ud):,} "
+              f"registered users.")
+    if len(ud_scoped) == 0:
+        st.info("No users match the current filter selection.")
+    else:
+        b3,b4 = st.columns(2)
+        with b3:
+            st.markdown("**Plug Type Distribution**")
+            if "PLUG_TYPE" in ud_scoped.columns:
+                plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
+                plugs.columns = ["Plug Type","Users"]
+                st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
+        with b4:
+            st.markdown("**Car Brand Distribution (Top 10)**")
+            if "CARBRAND" in ud_scoped.columns:
+                brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
+                brands.columns = ["Brand","Users"]
+                st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
 
 # ── SITE PERFORMANCE TABLE ───────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>Site Performance — Energy Utilization vs Capacity</div>",
@@ -999,39 +1247,6 @@ if is_company:
         f"matching an actual station in your session data ({', '.join(sorted(payback_ref['STATIONNAME'].unique())) if _n_matched else 'none'}); "
         f"the rest have no corresponding transaction history to cross-check against."
     )
-
-# ── USER SEGMENTS (charts — Company view only) ───────────────────────────────
-if is_company:
-    st.markdown("<div class='sec-hdr'>👤 User Segments</div>", unsafe_allow_html=True)
- 
-    # UserDetails has no STATIONNAME/MONTH/CHARGE_TYPE of its own (it's a
-    # user-level table, not a session-level one), so "respecting the
-    # filters" means scoping down to only the users who actually appear
-    # in the already-filtered session data (df) — i.e. users who charged
-    # at the selected station(s), in the selected month, with the
-    # selected charge type.
-    _filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
-    ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
- 
-    st.caption(f"📋 Scoped to the {len(ud_scoped):,} users with at least one matching session "
-              f"under the current filters — not all {len(ud):,} registered users.")
- 
-    if len(ud_scoped) == 0:
-        st.info("No users match the current filter selection.")
-    else:
-        br1,br2 = st.columns(2)
-        with br1:
-            st.markdown("**Car Brand Distribution (Top 10)**")
-            if "CARBRAND" in ud_scoped.columns:
-                brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
-                brands.columns = ["Brand","Users"]
-                st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
-        with br2:
-            st.markdown("**Plug Type Distribution**")
-            if "PLUG_TYPE" in ud_scoped.columns:
-                plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
-                plugs.columns = ["Plug Type","Users"]
-                st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
 
 # ── WALLET TOP-UP BEHAVIOR ────────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>💳 Wallet Top-Up Behavior</div>", unsafe_allow_html=True)
@@ -1177,7 +1392,7 @@ if not is_company:
             cs_col = "#4F7A1E" if cs=="Available" else ("#000000" if cs=="Charging" else "#C1443E")
             cp_sess = df[df["CHARGER_ID"]==row["CHARGER_ID"]]
             cp_kwh  = cp_sess["ENERGY_KWH"].sum()
-            cp_avail = row.get("CAPACITY_KW",0) * op_hours * days
+            cp_avail = row.get("CAPACITY_KW",0) * station_hours.get(sel_stations[0], op_hours_fallback)  * days
             cp_util  = round(cp_kwh/cp_avail*100,1) if cp_avail>0 else 0
             ports_label = f" · {int(row['PORTS'])} ports" if row.get("PORTS",1) > 1 else ""
             cols[i].markdown(
