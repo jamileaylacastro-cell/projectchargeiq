@@ -39,7 +39,7 @@ st.markdown(
     section[data-testid="stSidebar"] h5,
     section[data-testid="stSidebar"] h6 {{ color: {ACCENT}!important; }}
     .cq-header {{ font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.15em;
-        color: {ACCENT}; text-transform: uppercase; margin-bottom: -6px; }}
+        color: {MUTED}; text-transform: uppercase; margin-bottom: -6px; }}
     .cq-title {{ font-size: 30px; font-weight: 700; color: {TEXT}; margin-top: 0; }}
     .cq-metric-box {{ background-color: {PANEL}; border: 1px solid {GRID}; border-left: 3px solid {ACCENT}; border-radius: 4px; padding: 14px 18px; }}
     .cq-metric-label {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {MUTED}; text-transform: uppercase; letter-spacing: 0.08em; }}

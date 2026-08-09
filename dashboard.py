@@ -13,6 +13,8 @@ from utils.cleaning_dashboard import load_dashboard_data
 st.markdown("""
 <style>
 .stApp{background:#FFF4EC}
+[data-testid="stAppViewContainer"] > .main { padding-top: 0 !important; }
+div.block-container { padding-top: 0.5rem !important; }
 section[data-testid="stSidebar"]{background:#000000}
 section[data-testid="stSidebar"] *{color:#FFF4EC!important}
 section[data-testid="stSidebar"] h1,
@@ -663,10 +665,10 @@ Gap vs {target_util}% target   = {util_gap:+.1f} pp
         )
     if dur_excluded_count > 0:
         st.caption(
-            f"📋 **Session duration data quality:** {dur_excluded_count:,} sessions network-wide "
-            f"have a corrupted ENDTIME (defaulted to a placeholder date, producing a negative or "
-            f"implausible duration) and are excluded from Avg Session Duration only — their "
-            f"revenue, energy, and session counts still count everywhere else."
+            f"📋 **Session data quality:** {dur_excluded_count:,} sessions network-wide "
+            f"have invalid duration or energy values and are excluded from dashboard metrics. "
+            f"This helps ensure the charts and utilization calculations only reflect clean charging "
+            f"sessions."
         )
 
 # ── KPI HELPER ────────────────────────────────────────────────────────────────
@@ -728,7 +730,7 @@ if is_company and len(sel_stations) > 1:
 
     _leaderboard["util"]    = _top_performer("util")
     _leaderboard["uptime"]  = _top_performer("uptime")
-    _leaderboard["revenue"] = _top_performer("revenue", fmt="₱{:,.0f}")
+    _leaderboard["revenue"] = _top_performer("revenue", fmt="₱{:,.0f}", round_dp=0)
     _leaderboard["repeat"]  = _top_performer("repeat", min_users=5)  # avoid a 1-user "100%" outlier
 
 def _row_hdr_with_leaderboard(title, key):
@@ -815,20 +817,66 @@ else:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── CUSTOMER ENGAGEMENT ──────────────────────────────────────────────────────
-# Only stats not already shown elsewhere: Repeat Rate lives in the Customer
-# KPI row above; Preferred charge type/plug and Peak Hour duplicate the
-# Charging Preferences and Session Timing sections below — dropped here to
-# avoid showing the same number twice under two different labels.
-st.markdown("<div class='sec-hdr'>Customer Engagement</div>", unsafe_allow_html=True)
+# ── CUSTOMER BEHAVIOR ─────────────────────────────────────────────────────────
+# Engagement stats + how customers charge, pay, and fund their wallet — one
+# story about customer choices. Equipment/vehicle-side preferences (Power
+# Supply Mode, Plug Type, Car Brand) live separately in Charging Preferences
+# further down: that's "what hardware gets used," this is "how customers
+# behave." Repeat Rate stays in the Customer KPI row above, not repeated here.
+st.markdown("<div class='sec-hdr'>Customer Behavior</div>", unsafe_allow_html=True)
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Avg Session Duration (min)", f"{avg_dur:.0f}")
 col2.metric("Sessions / User (period)", f"{(sessions_per_user.mean() if len(sessions_per_user) else 0):.2f}")
 avg_kwh_session = (total_kwh:=df['ENERGY_KWH'].sum()) / total_sess if total_sess>0 else 0
 col3.metric("Avg kWh / Session", f"{avg_kwh_session:.2f}")
-st.caption("Repeat Customer Rate is in the Customer KPI row above; charging mode, plug, "
-          "and peak-hour patterns are in Session Timing and Charging Preferences below "
-          "— not repeated here.")
+
+cb1, cb2 = st.columns(2)
+with cb1:
+    st.markdown("**Energy (kWh) by Charging Mode**")
+    ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
+    ct.columns = ["Charging Mode","kWh"]
+    if len(ct): st.bar_chart(ct.set_index("Charging Mode"), color="#BEFF6C", height=200)
+with cb2:
+    st.markdown("**Payment Method Mix**")
+    pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
+    if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
+
+st.markdown("<div class='row-hdr'>Wallet Top-Up</div>", unsafe_allow_html=True)
+_has_type = "TRANSACTION_TYPE" in wt.columns
+_has_status = "STATUS" in wt.columns
+if not _has_type:
+    st.info("`TRANSACTION_TYPE` column not found in walletTransactions.xlsx — can't isolate top-ups from other transaction types.")
+else:
+    _topups = wt[wt["TRANSACTION_TYPE"] == "Wallet Top up"].copy()
+    if _has_status:
+        _topups = _topups[_topups["STATUS"] == "Completed"]
+    if not is_company:
+        # Scope to users who actually transacted at this station this period
+        # — wallet data has no STATIONNAME of its own since a top-up isn't
+        # tied to a location.
+        _wallet_user_ids = set(df["USERID"].dropna().astype(float).unique())
+        _topups = _topups[_topups["USERID"].astype(float).isin(_wallet_user_ids)]
+        st.caption(f"📋 Scoped to top-ups made by the {len(_wallet_user_ids):,} users with a "
+                  f"matching session at this station this period — wallet transactions have "
+                  f"no station of their own.")
+    if len(_topups) == 0:
+        st.info("No completed top-up transactions match the current selection.")
+    else:
+        wc1, wc2, wc3, wc4 = st.columns(4)
+        _avg_topup = _topups["AMOUNT"].mean()
+        _med_topup = _topups["AMOUNT"].median()
+        _n_topups  = len(_topups)
+        _n_topup_users = _topups["USERID"].nunique()
+        kpi(wc1, "Avg Top-Up Amount", f"₱{_avg_topup:,.0f}", f"Median: ₱{_med_topup:,.0f}", "up", "#BEFF6C")
+        kpi(wc2, "Total Top-Ups", f"{_n_topups:,}", f"{_n_topup_users:,} unique users", "up", "#BEFF6C")
+        kpi(wc3, "Top-Ups per User", f"{(_n_topups/_n_topup_users):.1f}" if _n_topup_users else "—",
+            "Avg completed top-ups per user", "up", "#000000")
+        if "PAYMENT_METHOD" in _topups.columns and len(_topups):
+            _top_method = _topups["PAYMENT_METHOD"].value_counts().index[0]
+            kpi(wc4, "Top Funding Method", _top_method, "Most used for top-ups", "up", "#000000")
+        else:
+            kpi(wc4, "Top Funding Method", "—", "PAYMENT_METHOD not found", "warn", "#A8710A")
 
 
 # ── UTILIZATION TREND — daily line across the full available date range,
@@ -1063,26 +1111,31 @@ with t2:
     if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW")[["Sessions"]], color="#BEFF6C", height=200)
 
 st.markdown("<div class='row-hdr'>Charging Preferences</div>", unsafe_allow_html=True)
-b1,b2,b3 = st.columns(3)
-with b1:
-    st.markdown("**Energy (kWh) by Charging Mode**")
-    ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
-    ct.columns = ["Charging Mode","kWh"]
-    if len(ct): st.bar_chart(ct.set_index("Charging Mode"), color="#BEFF6C", height=200)
-with b2:
-    st.markdown("**Payment Method Mix**")
-    pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
-    if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
-with b3:
+st.caption("Equipment and vehicle mix.")
+
+_charger_type_map = cp_cap.groupby("CHARGER_ID")["CHARGER_TYPE"].first()
+_df_psm = df.copy()
+_df_psm["POWER_SUPPLY_MODE"] = _df_psm["CHARGER_ID"].map(_charger_type_map)
+
+
+# Plug Type and Car Brand are USER attributes (from UserDetails), not
+# session attributes — that table has no STATIONNAME, so "station-level"
+# means scoping to users who had a matching session under the current
+# filters (works the same in either view; Host Partner just has a
+# smaller, single-station pool).
+_filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
+ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
+ 
+# Plug Type is only meaningful where 2+ plug types are actually installed
+# at the selected station(s) — with only one plug type on site, "which
+# plug do our customers have" is circular (only compatible customers can
+# charge there at all). With 2+ types installed, the split among
+# compatible customers becomes a real signal for connector planning.
+_installed_plug_types = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations)]["PLUG_TYPE"].nunique()
+
+p1, p2, p3 = st.columns(3)
+with p1:
     st.markdown("**Power Supply Mode**")
-    # CHARGER_TYPE (AC/DC) — the physical hardware, joined from Charge
-    # Point Info via CHARGER_ID since Session Logs don't carry it
-    # directly. Genuinely different from "Charging Mode" above (which is
-    # how the customer configured the session, not the hardware) — this
-    # is what actually explains fast vs. slow Avg Session Duration.
-    _charger_type_map = cp_cap.groupby("CHARGER_ID")["CHARGER_TYPE"].first()
-    _df_psm = df.copy()
-    _df_psm["POWER_SUPPLY_MODE"] = _df_psm["CHARGER_ID"].map(_charger_type_map)
     psm_ct = _df_psm.groupby("POWER_SUPPLY_MODE").size().reset_index(name="Sessions")
     psm_ct = psm_ct[psm_ct["POWER_SUPPLY_MODE"].notna()]
     if len(psm_ct):
@@ -1094,76 +1147,105 @@ with b3:
     else:
         st.info("No Power Supply Mode data — CHARGER_TYPE not available for these chargers in "
                "Charge Point Info.")
+with p2:
+    st.markdown("**Plug Type Distribution**")
+    if _installed_plug_types < 2:
+        st.caption(f"Only {_installed_plug_types} plug type installed at the selected "
+                  f"station(s) — a distribution here would be circular (only compatible "
+                  f"customers can charge here at all). This shows only when 2+ types are installed.")
+    elif len(ud_scoped) and "PLUG_TYPE" in ud_scoped.columns:
+        plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
+        plugs.columns = ["Plug Type","Users"]
+        st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
+        st.caption("Demand split among your installed chargers to know what your customers actually have.")
+    else:
+        st.info("No users match the current filter selection.")
+with p3:
+    st.markdown("**Car Brand Distribution (Top 10)**")
+    if len(ud_scoped) and "CARBRAND" in ud_scoped.columns:
+        brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
+        brands.columns = ["Brand","Users"]
+        st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
+    else:
+        st.info("No users match the current filter selection.")
 
-# Anomaly check: a DC (fast) session taking as long as a typical AC
-# (slow) session, or an AC session charging at DC-like speed, suggests a
-# mislabeled charger, a hardware fault, or a data entry error — not
-# normal behavior. Thresholds come from the FULL network (a stable
-# baseline), not the current filter, so they don't drift if you filter
-# down to a single unusual station.
+st.caption(f"📋 Plug type & car brand scoped to the {len(ud_scoped):,} users with at least "
+           f"one matching session under the current filters — not all {len(ud):,} "
+           f"registered users.")
+
+
+# ── ANOMALY CHECK ────────────────────────────────────────────────────────────
+# Rate-based (kWh delivered per minute), not duration-based. Duration alone
+# doesn't define whether a session looks wrong: a DC session that runs long
+# but also delivers a lot of energy is normal (a big battery can legitimately
+# take a while, even on fast charging); the real signal is a LOW delivery
+# rate, regardless of how long the session ran. Same logic applies
+# symmetrically to AC — a short AC session isn't suspicious on its own, but
+# one that delivers energy at DC-like speed is. (A full AC charge in this
+# data typically runs ~3.5 hours once you filter to sessions of a
+# meaningful size — a plain "AC session took >X minutes" check would have
+# flagged most ordinary AC charging as anomalous.)
+#
+# Data cleaning applied before computing any rate: sessions under 1 minute
+# are logging artifacts, not real charges (a handful in this data show
+# ENERGY_KWH delivered in under a second — division by near-zero duration
+# produces an infinite or absurd rate). Sessions above 200 kWh are also
+# excluded — a typical EV battery is 20-100 kWh, so a single-session value
+# far beyond that is almost certainly a unit or decimal data-entry error
+# (one row in this network shows 35,000+ kWh for a single session) rather
+# than a genuine large-vehicle charge. Recommend EVOxCharge investigate
+# both patterns at the source system level, since they will quietly inflate
+# or corrupt any rate/efficiency metric computed from ENERGY_KWH / duration.
+def _rate_valid(frame):
+    return frame[
+        (frame["DURATION_MIN"] >= 1) &
+        (frame["ENERGY_KWH"] > 0) &
+        (frame["ENERGY_KWH"] <= 200)
+    ].copy()
+
 _baseline = tx[(~tx["ISERROR"].astype(bool)) & tx["DURATION_MIN"].notna()].copy()
 _baseline["POWER_SUPPLY_MODE"] = _baseline["CHARGER_ID"].map(_charger_type_map)
-_ac_median_dur = _baseline.loc[_baseline["POWER_SUPPLY_MODE"]=="AC", "DURATION_MIN"].median()
-_dc_base = _baseline[_baseline["POWER_SUPPLY_MODE"]=="DC"].copy()
-_dc_base["RATE"] = _dc_base["ENERGY_KWH"] / _dc_base["DURATION_MIN"]
-_dc_median_rate = _dc_base["RATE"].median()
+_baseline = _rate_valid(_baseline)
+_baseline["RATE"] = _baseline["ENERGY_KWH"] / _baseline["DURATION_MIN"]
+_ac_median_rate = _baseline.loc[_baseline["POWER_SUPPLY_MODE"]=="AC", "RATE"].median()
+_dc_median_rate = _baseline.loc[_baseline["POWER_SUPPLY_MODE"]=="DC", "RATE"].median()
 
-_scope = _df_psm[_df_psm["DURATION_MIN"].notna()].copy()
+_scope = _rate_valid(_df_psm[_df_psm["DURATION_MIN"].notna()])
 _scope["RATE"] = _scope["ENERGY_KWH"] / _scope["DURATION_MIN"]
-_dc_slow = (_scope[(_scope["POWER_SUPPLY_MODE"]=="DC") & (_scope["DURATION_MIN"] > _ac_median_dur)]
-           if pd.notna(_ac_median_dur) else _scope.iloc[0:0])
+_dc_slow = (_scope[(_scope["POWER_SUPPLY_MODE"]=="DC") & (_scope["RATE"] < _ac_median_rate)]
+           if pd.notna(_ac_median_rate) else _scope.iloc[0:0])
 _ac_fast = (_scope[(_scope["POWER_SUPPLY_MODE"]=="AC") & (_scope["RATE"] > _dc_median_rate*0.5)]
            if pd.notna(_dc_median_rate) else _scope.iloc[0:0])
 _n_anom = len(_dc_slow) + len(_ac_fast)
+_n_excluded = len(_df_psm[_df_psm["DURATION_MIN"].notna()]) - len(_scope)
 
 if _n_anom > 0:
     st.markdown(
         f"<div style='background:#FEF3DC;border-left:3px solid #A8710A;border-radius:4px;"
         f"padding:8px 12px;margin-top:4px;font-size:11px;color:#000'>"
-        f"⚠️ <b>{_n_anom} anomal{'y' if _n_anom==1 else 'ies'} in current selection:</b> "
-        f"{len(_dc_slow)} DC session(s) took longer than a typical AC session "
-        f"(&gt;{_ac_median_dur:.0f} min) — possible mislabeled or underperforming fast charger; "
-        f"{len(_ac_fast)} AC session(s) charged at DC-like speed — possible mislabeled connector "
-        f"or data error.</div>", unsafe_allow_html=True
+        f"⚠️ <b>{_n_anom} anomal{'y' if _n_anom==1 else 'ies'} in current selection "
+        f"(rate-based, not duration-based):</b> "
+        f"{len(_dc_slow)} DC session(s) delivered energy slower than a typical AC session "
+        f"(&lt;{_ac_median_rate:.2f} kWh/min) — possible mislabeled or underperforming fast "
+        f"charger; {len(_ac_fast)} AC session(s) delivered energy at DC-like speed "
+        f"(&gt;{_dc_median_rate*0.5:.2f} kWh/min) — possible mislabeled connector or data error."
+        f"</div>", unsafe_allow_html=True
     )
     with st.expander(f"View the {min(_n_anom,20)} flagged sessions", expanded=False):
         _flagged = pd.concat([
             _dc_slow.assign(**{"Flag": "DC running slow"}),
             _ac_fast.assign(**{"Flag": "AC running fast"}),
-        ]).sort_values("DURATION_MIN", ascending=False).head(20)
-        _flagged_display = _flagged[["STATIONNAME","CHARGER_ID","POWER_SUPPLY_MODE",
-                                     "DURATION_MIN","ENERGY_KWH","Flag"]].rename(columns={
-            "STATIONNAME":"Station","CHARGER_ID":"Charger","POWER_SUPPLY_MODE":"Type",
-            "DURATION_MIN":"Duration (min)","ENERGY_KWH":"kWh"})
+        ]).sort_values("RATE").head(20)
+        _flagged["Charger"] = _flagged["CHARGER_ID"].astype(str)
+        _flagged_display = _flagged[["STATIONNAME","Charger","POWER_SUPPLY_MODE",
+                                     "DURATION_MIN","ENERGY_KWH","RATE","Flag"]].rename(columns={
+            "STATIONNAME":"Station","POWER_SUPPLY_MODE":"Type",
+            "DURATION_MIN":"Duration (min)","ENERGY_KWH":"kWh","RATE":"kWh/min"})
         st.dataframe(_flagged_display, use_container_width=True, hide_index=True)
-
-# Plug type / car brand come from UserDetails (a user-level table, not
-# session-level), so — same as before — scope to only the users with a
-# matching session under the current filters, and keep this pair
-# Company-view only (UserDetails has no per-station granularity to make
-# it meaningful for a single Host Partner site).
-if is_company:
-    _filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
-    ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
-    st.caption(f"📋 Plug type & car brand below scoped to the {len(ud_scoped):,} users with at "
-              f"least one matching session under the current filters — not all {len(ud):,} "
-              f"registered users.")
-    if len(ud_scoped) == 0:
-        st.info("No users match the current filter selection.")
-    else:
-        b3,b4 = st.columns(2)
-        with b3:
-            st.markdown("**Plug Type Distribution**")
-            if "PLUG_TYPE" in ud_scoped.columns:
-                plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
-                plugs.columns = ["Plug Type","Users"]
-                st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
-        with b4:
-            st.markdown("**Car Brand Distribution (Top 10)**")
-            if "CARBRAND" in ud_scoped.columns:
-                brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
-                brands.columns = ["Brand","Users"]
-                st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
+    if _n_excluded > 0:
+        st.caption(f"📋 {_n_excluded:,} session(s) in this selection excluded from rate analysis "
+                  f"for data quality (near-instant duration or implausible energy value) — see "
+                  f"the section notes above for recommended data cleaning.")
 
 # ── SITE PERFORMANCE TABLE ───────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>Site Performance — Energy Utilization vs Capacity</div>",
@@ -1214,8 +1296,7 @@ if len(_err_scope) and "CHARGER_ID" in _err_scope.columns:
     if len(_cp_err) == 0:
         st.info("No chargers in the current selection have enough sessions (≥3) this period to rank.")
     else:
-        st.caption("Top 10 chargers by error rate this period (min. 3 sessions) — a maintenance "
-                  "dispatch list, not just a network-wide percentage.")
+        st.caption("Top 10 chargers by error rate this period (min. 3 sessions)")
         for _, r in _cp_err.iterrows():
             rate = r["Error Rate %"]
             bc = "#C1443E" if rate > 10 else ("#A8710A" if rate > 5 else "#BEFF6C")
@@ -1247,47 +1328,6 @@ if is_company:
         f"matching an actual station in your session data ({', '.join(sorted(payback_ref['STATIONNAME'].unique())) if _n_matched else 'none'}); "
         f"the rest have no corresponding transaction history to cross-check against."
     )
-
-# ── WALLET TOP-UP BEHAVIOR ────────────────────────────────────────────────────
-st.markdown("<div class='sec-hdr'>💳 Wallet Top-Up Behavior</div>", unsafe_allow_html=True)
- 
-_has_type = "TRANSACTION_TYPE" in wt.columns
-_has_status = "STATUS" in wt.columns
- 
-if not _has_type:
-    st.info("`TRANSACTION_TYPE` column not found in walletTransactions.xlsx — can't isolate top-ups from other transaction types.")
-else:
-    _topups = wt[wt["TRANSACTION_TYPE"] == "Wallet Top up"].copy()
-    if _has_status:
-        _topups = _topups[_topups["STATUS"] == "Completed"]
- 
-    if not is_company:
-        # Scope to users who actually transacted at this station this period,
-        # same join pattern as User Segments — wallet data has no
-        # STATIONNAME of its own since a top-up isn't tied to a location.
-        _wallet_user_ids = set(df["USERID"].dropna().astype(float).unique())
-        _topups = _topups[_topups["USERID"].astype(float).isin(_wallet_user_ids)]
-        st.caption(f"📋 Scoped to top-ups made by the {len(_wallet_user_ids):,} users with a "
-                  f"matching session at this station this period — wallet transactions have "
-                  f"no station of their own.")
- 
-    if len(_topups) == 0:
-        st.info("No completed top-up transactions match the current selection.")
-    else:
-        wc1, wc2, wc3, wc4 = st.columns(4)
-        _avg_topup = _topups["AMOUNT"].mean()
-        _med_topup = _topups["AMOUNT"].median()
-        _n_topups  = len(_topups)
-        _n_topup_users = _topups["USERID"].nunique()
-        kpi(wc1, "Avg Top-Up Amount", f"₱{_avg_topup:,.0f}", f"Median: ₱{_med_topup:,.0f}", "up", "#BEFF6C")
-        kpi(wc2, "Total Top-Ups", f"{_n_topups:,}", f"{_n_topup_users:,} unique users", "up", "#BEFF6C")
-        kpi(wc3, "Top-Ups per User", f"{(_n_topups/_n_topup_users):.1f}" if _n_topup_users else "—",
-            "Avg completed top-ups per user", "up", "#000000")
-        if "PAYMENT_METHOD" in _topups.columns and len(_topups):
-            _top_method = _topups["PAYMENT_METHOD"].value_counts().index[0]
-            kpi(wc4, "Top Funding Method", _top_method, "Most used for top-ups", "up", "#000000")
-        else:
-            kpi(wc4, "Top Funding Method", "—", "PAYMENT_METHOD not found", "warn", "#A8710A")
 
 # ── SITE PAYBACK TRACKER — Host Partner Site view only ──────────────────────
 if not is_company:

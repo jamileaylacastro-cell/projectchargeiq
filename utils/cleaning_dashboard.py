@@ -42,15 +42,21 @@ def load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, tx_excluded_b=None)
 
     tx["STARTTIME"] = pd.to_datetime(tx["STARTTIME"], errors="coerce")
     tx["ENDTIME"] = pd.to_datetime(tx["ENDTIME"], errors="coerce")
+    tx["ENERGY_KWH"] = pd.to_numeric(tx["ENERGY_KWH"], errors="coerce")
     tx = tx[tx["STARTTIME"].dt.year > 2020].copy()
     tx["DATE"] = tx["STARTTIME"].dt.date
     tx["MONTH"] = tx["STARTTIME"].dt.to_period("M")
     tx["HOUR"] = tx["STARTTIME"].dt.hour
     tx["DURATION_MIN"] = (tx["ENDTIME"] - tx["STARTTIME"]).dt.total_seconds() / 60
 
-    _dur_bad = (tx["DURATION_MIN"] < 10) | (tx["DURATION_MIN"] > 1440)
-    dur_excluded_count = int(_dur_bad.sum())
-    tx.loc[_dur_bad, "DURATION_MIN"] = np.nan
+    _clean = (
+        (tx["DURATION_MIN"] >= 10) &
+        (tx["DURATION_MIN"] <= 1440) &
+        (tx["ENERGY_KWH"] > 0) &
+        (tx["ENERGY_KWH"] <= 200)
+    )
+    dur_excluded_count = int((~_clean).sum())
+    tx = tx[_clean].copy()
 
     sp_coords = sp.groupby("STATIONNAME")[["LATITUDE", "LONGITUDE", "BUSINESS_START", "BUSINESS_END", "RATE_PER_KWH"]].first().reset_index()
     cp = cp.merge(sp_coords[["STATIONNAME", "BUSINESS_START", "BUSINESS_END"]], on="STATIONNAME", how="left")
