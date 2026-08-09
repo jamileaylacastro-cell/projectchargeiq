@@ -48,7 +48,7 @@ def load_dashboard_data(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, tx_excluded_b=None)
     tx["HOUR"] = tx["STARTTIME"].dt.hour
     tx["DURATION_MIN"] = (tx["ENDTIME"] - tx["STARTTIME"]).dt.total_seconds() / 60
 
-    _dur_bad = (tx["DURATION_MIN"] < 0) | (tx["DURATION_MIN"] > 1440)
+    _dur_bad = (tx["DURATION_MIN"] < 10) | (tx["DURATION_MIN"] > 1440)
     dur_excluded_count = int(_dur_bad.sum())
     tx.loc[_dur_bad, "DURATION_MIN"] = np.nan
 
