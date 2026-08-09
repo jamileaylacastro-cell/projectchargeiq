@@ -40,10 +40,33 @@ section[data-testid="stSidebar"] h3{color:#BEFF6C!important}
 
 /* Multiselect selected pills — lime bg, black text, everywhere */
 span[data-baseweb="tag"], div[data-baseweb="tag"]{
-  background-color:#BEFF6C!important; border-color:#000000!important;
+    background-color:#BEFF6C!important; border-color:#000000!important;
 }
 span[data-baseweb="tag"] *, div[data-baseweb="tag"] *{ color:#000000!important; }
 span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg{ fill:#000000!important; }
+
+/* Extra-safe overrides: Streamlit/BaseWeb markup can vary across versions
+     (class names / nesting change). Apply a few broad selectors scoped to the
+     sidebar to guarantee the selected-pill appearance stays lime on every
+     supported app host. These intentionally use high-specificity and
+     !important to win over inline styles produced by the widget library. */
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] span,
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] div,
+section[data-testid="stSidebar"] .stMultiSelect span,
+section[data-testid="stSidebar"] [data-baseweb="tag"],
+section[data-testid="stSidebar"] span[class*="tag"],
+section[data-testid="stSidebar"] div[class*="tag"] {
+    background-color: #BEFF6C !important;
+    border-color: #000000 !important;
+    color: #000000 !important;
+}
+/* Ensure the close icon remains visible */
+section[data-testid="stSidebar"] .stMultiSelect button, 
+section[data-testid="stSidebar"] [aria-label*="remove"],
+section[data-testid="stSidebar"] svg {
+    fill: #000000 !important;
+    color: #000000 !important;
+}
 
 /* Select / multiselect closed box — white bg, black text, no red focus ring */
 div[data-baseweb="select"] > div{
