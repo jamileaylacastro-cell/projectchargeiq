@@ -13,16 +13,16 @@ from utils.diagnostics import compute_residuals, acf_pacf_data, qq_plot_data, lj
 # runs this page — calling it again here would raise a StreamlitAPIException.
 
 # ---------------------------------------------------------------------------
-# Theme (same dark console look as the standalone forecasting prototype)
+# Theme (aligned to the dashboard color palette)
 # ---------------------------------------------------------------------------
-ACCENT = "#C4F135"
-BG = "#0E1116"
-PANEL = "#161B22"
-GRID = "#232A34"
-TEXT = "#E6E8EB"
-MUTED = "#CBD0D6"
-MUTED_DARK = "#6B7280"
-WARN = "#FF6B6B"
+ACCENT = "#BEFF6C"
+BG = "#FFF4EC"
+PANEL = "#FFFFFF"
+GRID = "#EAE0D0"
+TEXT = "#000000"
+MUTED = "#5C574D"
+MUTED_DARK = "#5C574D"
+WARN = "#C1443E"
 
 st.markdown(
     f"""
@@ -30,48 +30,16 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; background-color: {BG}; color: {TEXT}; }}
     .stApp {{ background-color: {BG}; }}
-    section[data-testid="stSidebar"] {{ background-color: {PANEL}; border-right: 1px solid {GRID}; }}
+    section[data-testid="stSidebar"] {{ background-color: #000000; }}
+    section[data-testid="stSidebar"] * {{ color: #FFF4EC!important; }}
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] h4,
+    section[data-testid="stSidebar"] h5,
+    section[data-testid="stSidebar"] h6 {{ color: {ACCENT}!important; }}
     .cq-header {{ font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.15em;
         color: {ACCENT}; text-transform: uppercase; margin-bottom: -6px; }}
-    h1, h2, h3, h4, h5, h6 {{ color: {TEXT} !important; }}
-    /* Sidebar headings/nav labels white */
-    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3,
-    section[data-testid="stSidebar"] h4, section[data-testid="stSidebar"] h5, section[data-testid="stSidebar"] h6,
-    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] {{ color: {TEXT} !important; }}
-    /* Widget labels in sidebar white */
-    section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .stRadioLabel,
-    section[data-testid="stSidebar"] .stSelectbox label, section[data-testid="stSidebar"] .stSlider label,
-    section[data-testid="stSidebar"] .stNumberInput label, section[data-testid="stSidebar"] .stTextInput label,
-    section[data-testid="stSidebar"] .stFileUploader label, section[data-testid="stSidebar"] .stDownloadButton button {{ color: {TEXT} !important; }}
-    /* Input text / placeholders muted */
-    section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] textarea,
-    section[data-testid="stSidebar"] .stNumberInput input {{ color: {MUTED_DARK} !important; }}
-    section[data-testid="stSidebar"] ::placeholder {{ color: {MUTED_DARK} !important; opacity: 1 !important; }}
-    /* File uploader inner text should be a darker muted grey for readability on white background */
-    section[data-testid="stSidebar"] .stFileUploader, section[data-testid="stSidebar"] .stFileUploader * {{
-        color: {MUTED_DARK} !important; fill: {MUTED_DARK} !important; stroke: {MUTED_DARK} !important; opacity: 1 !important;
-    }}
-    /* Target common inner elements used by Streamlit uploader */
-    section[data-testid="stSidebar"] .stFileUploader div, section[data-testid="stSidebar"] .stFileUploader div *,
-    section[data-testid="stSidebar"] .stFileUploader p, section[data-testid="stSidebar"] .stFileUploader p *,
-    section[data-testid="stSidebar"] .stFileUploader span, section[data-testid="stSidebar"] .stFileUploader span *,
-    section[data-testid="stSidebar"] .stFileUploader label, section[data-testid="stSidebar"] .stFileUploader label *,
-    section[data-testid="stSidebar"] .stFileUploader button, section[data-testid="stSidebar"] .stFileUploader button *,
-    section[data-testid="stSidebar"] .stFileUploader .upload-button, section[data-testid="stSidebar"] .stFileUploader .upload-button * {{
-        color: {MUTED_DARK} !important; fill: {MUTED_DARK} !important; stroke: {MUTED_DARK} !important; opacity: 1 !important;
-    }}
-    /* Make almost all sidebar text white, but exclude form inputs and placeholders */
-    section[data-testid="stSidebar"] *:not(input):not(textarea):not(select):not([role="spinbutton"]):not(.stFileUploader) {{ color: {TEXT} !important; }}
-    /* Structural icons and chevrons white */
-    section[data-testid="stSidebar"] svg, section[data-testid="stSidebar"] path, section[data-testid="stSidebar"] g,
-    .css-1r6slb0 svg, .css-1r6slb0 path {{ fill: {TEXT} !important; stroke: {TEXT} !important; color: {TEXT} !important; opacity: 1 !important; filter: none !important; }}
-    /* Keep helper/info icons muted so they contrast inside white inputs */
-    section[data-testid="stSidebar"] .css-1o6w3yu svg, section[data-testid="stSidebar"] button[title^="Help"] svg, section[data-testid="stSidebar"] [data-testid$="helpIcon"] svg {{ fill: {MUTED_DARK} !important; stroke: {MUTED_DARK} !important; color: {MUTED_DARK} !important; opacity: 1 !important; }}
-    /* Ensure control buttons (chevrons) are white even when not hovered */
-    .stApp button svg, .stApp button:hover svg,
-    .stApp [role="button"] svg, .stApp [role="button"]:hover svg {{
-        fill: {TEXT} !important; stroke: {TEXT} !important; color: {TEXT} !important; opacity: 1 !important; filter: none !important;
-    }}
     .cq-title {{ font-size: 30px; font-weight: 700; color: {TEXT}; margin-top: 0; }}
     .cq-metric-box {{ background-color: {PANEL}; border: 1px solid {GRID}; border-left: 3px solid {ACCENT}; border-radius: 4px; padding: 14px 18px; }}
     .cq-metric-label {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {MUTED}; text-transform: uppercase; letter-spacing: 0.08em; }}
@@ -79,6 +47,57 @@ st.markdown(
     .cq-section-label {{ font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {MUTED}; text-transform: uppercase; letter-spacing: 0.1em; margin: 1.2rem 0 0.4rem 0; }}
     div[data-testid="stTabs"] button {{ font-family: 'JetBrains Mono', monospace; font-size: 13px; }}
     hr {{ border-color: {GRID}; }}
+
+    /* Widget styling to match the dashboard page */
+    span[data-baseweb="tag"], div[data-baseweb="tag"] {{ background-color:{ACCENT}!important; border-color:#000000!important; }}
+    span[data-baseweb="tag"] *, div[data-baseweb="tag"] * {{ color:#000000!important; }}
+    span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg {{ fill:#000000!important; }}
+    div[data-baseweb="select"] > div {{ border-color:{GRID}!important; background:#FFFFFF!important; outline:none!important; }}
+    div[data-baseweb="select"] > div * {{ color:#000000!important; }}
+    div[data-baseweb="select"]:focus-within > div,
+    div[data-baseweb="select"] > div:focus,
+    div[data-baseweb="select"] > div:focus-within {{ border-color:{ACCENT}!important; box-shadow:0 0 0 1px {ACCENT}!important; background:#FFFFFF!important; outline:none!important; }}
+    div[data-baseweb="select"] input {{ outline:none!important; box-shadow:none!important; }}
+    div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:#000000!important; }}
+    div[data-baseweb="popover"], div[data-baseweb="menu"] {{ background:#FFFFFF!important; }}
+    div[data-baseweb="popover"] *, div[data-baseweb="menu"] * {{ color:#000000!important; }}
+    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li {{ background:#FFFFFF!important; }}
+    div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
+    div[data-baseweb="popover"] li[aria-selected="true"],
+    div[data-baseweb="menu"] li[aria-selected="true"] {{ background-color:{ACCENT}!important; }}
+    div[data-baseweb="popover"] li:hover *, div[data-baseweb="menu"] li:hover *,
+    div[data-baseweb="popover"] li[aria-selected="true"] *,
+    div[data-baseweb="menu"] li[aria-selected="true"] * {{ color:#000000!important; }}
+    input[type="checkbox"], input[type="radio"] {{ accent-color:{ACCENT}!important; }}
+    div[data-testid="stSlider"] div[role="slider"] {{ background-color:#000000!important; border-color:#000000!important; }}
+    button[kind="primary"] {{ background-color:{ACCENT}!important; border-color:#000000!important; }}
+    button[kind="primary"] * {{ color:#000000!important; }}
+    button[kind="secondary"] {{ border-color:#000000!important; background:#FFFFFF!important; }}
+    button[kind="secondary"] * {{ color:#000000!important; }}
+    div[data-testid="stFileUploader"] section {{ background:#FFFFFF!important; border:1px dashed #000000!important; }}
+    div[data-testid="stFileUploader"] section * {{ color:#000000!important; }}
+    div[data-testid="stFileUploader"] section small {{ color:{MUTED}!important; }}
+    div[data-testid="stFileUploaderDropzoneInstructions"] * {{ color:#000000!important; }}
+    div[data-testid="stFileUploader"] button {{ background:{ACCENT}!important; color:#000000!important; border-color:#000000!important; }}
+    div[data-testid="stFileUploader"] button * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="popover"] *,
+    section[data-testid="stSidebar"] div[data-baseweb="menu"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
+    section[data-testid="stSidebar"] div[data-baseweb="tag"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] button[kind="primary"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] button[kind="secondary"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label,
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label *,
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label,
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label * {{ color:#FFF4EC!important; }}
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{ background:#FFFFFF!important; }}
     </style>
     """,
     unsafe_allow_html=True,
