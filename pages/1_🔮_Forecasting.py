@@ -49,9 +49,17 @@ st.markdown(
     hr {{ border-color: {GRID}; }}
 
     /* Widget styling to match the dashboard page */
-    span[data-baseweb="tag"], div[data-baseweb="tag"] {{ background-color:{ACCENT}!important; border-color:#000000!important; }}
-    span[data-baseweb="tag"] *, div[data-baseweb="tag"] * {{ color:#000000!important; }}
-    span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg {{ fill:#000000!important; }}
+    /* Broad selectors to ensure tag pills use the accent color and black text */
+    span[data-baseweb="tag"], div[data-baseweb="tag"],
+    div[class*="tags"], span[class*="tags"],
+    div[class*="tag"], span[class*="tag"],
+    button[aria-label*="remove"], button[aria-label*="close"] {{
+        background-color:{ACCENT}!important; border-color:#000000!important; color:#000000!important;
+    }}
+    span[data-baseweb="tag"] *, div[data-baseweb="tag"] *,
+    div[class*="tag"] *, span[class*="tag"] * {{ color:#000000!important; }}
+    span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg,
+    button[aria-label*="remove"] svg, button[aria-label*="close"] svg {{ fill:#000000!important; }}
     div[data-baseweb="select"] > div {{ border-color:{GRID}!important; background:#FFFFFF!important; outline:none!important; }}
     div[data-baseweb="select"] > div * {{ color:#000000!important; }}
     div[data-baseweb="select"]:focus-within > div,

@@ -38,12 +38,19 @@ section[data-testid="stSidebar"] h3{color:#BEFF6C!important}
 /* ── Kill Streamlit's default red accents; guarantee readable text on
      every light/lime background, even inside the black sidebar ──────── */
 
-/* Multiselect selected pills — lime bg, black text, everywhere */
-span[data-baseweb="tag"], div[data-baseweb="tag"]{
-  background-color:#BEFF6C!important; border-color:#000000!important;
+/* Multiselect / tag pills — force the accent (lime) background and black text
+     across a range of possible widget DOM variations to override any red/error
+     variant styling that may appear in some Streamlit/BaseWeb versions. */
+span[data-baseweb="tag"], div[data-baseweb="tag"],
+div[class*="tags"], span[class*="tags"],
+div[class*="tag"], span[class*="tag"],
+button[aria-label*="remove"], button[aria-label*="close"]{
+    background-color:#BEFF6C!important; border-color:#000000!important; color:#000000!important;
 }
-span[data-baseweb="tag"] *, div[data-baseweb="tag"] *{ color:#000000!important; }
-span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg{ fill:#000000!important; }
+span[data-baseweb="tag"] *, div[data-baseweb="tag"] *,
+div[class*="tag"] *, span[class*="tag"] *{ color:#000000!important; }
+span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg,
+button[aria-label*="remove"] svg, button[aria-label*="close"] svg{ fill:#000000!important; }
 
 /* Select / multiselect closed box — white bg, black text, no red focus ring */
 div[data-baseweb="select"] > div{
