@@ -13,16 +13,26 @@ from utils.diagnostics import compute_residuals, acf_pacf_data, qq_plot_data, lj
 # runs this page — calling it again here would raise a StreamlitAPIException.
 
 # ---------------------------------------------------------------------------
-# Theme (aligned to the dashboard color palette)
+# Theme (aligned to the dashboard color palette; adapts to light/dark via
+# st.context.theme.type — see dashboard.py's THEME section for why this is
+# resolved in Python rather than via CSS custom properties: these constants
+# also feed Plotly's plot_bgcolor/font colors, which can't consume CSS vars
+# since Plotly renders its own SVG outside the page's CSS cascade.)
 # ---------------------------------------------------------------------------
-ACCENT = "#BEFF6C"
-BG = "#FFF4EC"
-PANEL = "#FFFFFF"
-GRID = "#EAE0D0"
-TEXT = "#000000"
-MUTED = "#5C574D"
-MUTED_DARK = "#5C574D"
-WARN = "#C1443E"
+_dark = st.context.theme.type == "dark"
+
+ACCENT      = "#BEFF6C"                        # brand-constant lime
+ACCENT_TEXT = "#000000"                        # text/border on the lime accent — constant
+BLACK       = "#000000"                        # decorative: sidebar bg
+CREAM       = "#FFF4EC"                        # decorative: sidebar text
+
+BG    = "#15140F" if _dark else "#FFF4EC"
+PANEL = "#211F17" if _dark else "#FFFFFF"
+GRID  = "#3A3628" if _dark else "#EAE0D0"
+TEXT  = "#F3F1E9" if _dark else "#000000"
+MUTED = "#B8B2A0" if _dark else "#5C574D"
+MUTED_DARK = MUTED
+WARN  = "#E6675F" if _dark else "#C1443E"
 
 st.markdown(
     f"""
@@ -30,8 +40,8 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; background-color: {BG}; color: {TEXT}; }}
     .stApp {{ background-color: {BG}; }}
-    section[data-testid="stSidebar"] {{ background-color: #000000; }}
-    section[data-testid="stSidebar"] * {{ color: #FFF4EC!important; }}
+    section[data-testid="stSidebar"] {{ background-color: {BLACK}; }}
+    section[data-testid="stSidebar"] * {{ color: {CREAM}!important; }}
     section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
     section[data-testid="stSidebar"] h3,
@@ -54,58 +64,84 @@ st.markdown(
     div[class*="tags"], span[class*="tags"],
     div[class*="tag"], span[class*="tag"],
     button[aria-label*="remove"], button[aria-label*="close"] {{
-        background-color:{ACCENT}!important; border-color:#000000!important; color:#000000!important;
+        background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important; color:{ACCENT_TEXT}!important;
     }}
     span[data-baseweb="tag"] *, div[data-baseweb="tag"] *,
-    div[class*="tag"] *, span[class*="tag"] * {{ color:#000000!important; }}
+    div[class*="tag"] *, span[class*="tag"] * {{ color:{ACCENT_TEXT}!important; }}
     span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg,
-    button[aria-label*="remove"] svg, button[aria-label*="close"] svg {{ fill:#000000!important; }}
-    div[data-baseweb="select"] > div {{ border-color:{GRID}!important; background:#FFFFFF!important; outline:none!important; }}
-    div[data-baseweb="select"] > div * {{ color:#000000!important; }}
+    button[aria-label*="remove"] svg, button[aria-label*="close"] svg {{ fill:{ACCENT_TEXT}!important; }}
+    div[data-baseweb="select"] > div {{ border-color:{GRID}!important; background:{PANEL}!important; outline:none!important; }}
+    div[data-baseweb="select"] > div * {{ color:{TEXT}!important; }}
     div[data-baseweb="select"]:focus-within > div,
     div[data-baseweb="select"] > div:focus,
-    div[data-baseweb="select"] > div:focus-within {{ border-color:{ACCENT}!important; box-shadow:0 0 0 1px {ACCENT}!important; background:#FFFFFF!important; outline:none!important; }}
+    div[data-baseweb="select"] > div:focus-within {{ border-color:{ACCENT}!important; box-shadow:0 0 0 1px {ACCENT}!important; background:{PANEL}!important; outline:none!important; }}
     div[data-baseweb="select"] input {{ outline:none!important; box-shadow:none!important; }}
-    div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:#000000!important; }}
-    div[data-baseweb="popover"], div[data-baseweb="menu"] {{ background:#FFFFFF!important; }}
-    div[data-baseweb="popover"] *, div[data-baseweb="menu"] * {{ color:#000000!important; }}
-    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li {{ background:#FFFFFF!important; }}
+    div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:{ACCENT_TEXT}!important; }}
+    div[data-baseweb="popover"], div[data-baseweb="menu"] {{ background:{PANEL}!important; }}
+    div[data-baseweb="popover"] *, div[data-baseweb="menu"] * {{ color:{TEXT}!important; }}
+    div[data-baseweb="popover"] li, div[data-baseweb="menu"] li {{ background:{PANEL}!important; }}
     div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
     div[data-baseweb="popover"] li[aria-selected="true"],
     div[data-baseweb="menu"] li[aria-selected="true"] {{ background-color:{ACCENT}!important; }}
     div[data-baseweb="popover"] li:hover *, div[data-baseweb="menu"] li:hover *,
     div[data-baseweb="popover"] li[aria-selected="true"] *,
-    div[data-baseweb="menu"] li[aria-selected="true"] * {{ color:#000000!important; }}
+    div[data-baseweb="menu"] li[aria-selected="true"] * {{ color:{ACCENT_TEXT}!important; }}
     input[type="checkbox"], input[type="radio"] {{ accent-color:{ACCENT}!important; }}
-    div[data-testid="stSlider"] div[role="slider"] {{ background-color:#000000!important; border-color:#000000!important; }}
-    button[kind="primary"] {{ background-color:{ACCENT}!important; border-color:#000000!important; }}
-    button[kind="primary"] * {{ color:#000000!important; }}
-    button[kind="secondary"] {{ border-color:#000000!important; background:#FFFFFF!important; }}
-    button[kind="secondary"] * {{ color:#000000!important; }}
-    div[data-testid="stFileUploader"] section {{ background:#FFFFFF!important; border:1px dashed #000000!important; }}
-    div[data-testid="stFileUploader"] section * {{ color:#000000!important; }}
+
+    /* Selected st.radio() "pill" and the slider thumb — newer Streamlit
+       builds dropped the role="radio"/role="slider" hooks these used to
+       rely on, so both are targeted structurally via :has() instead. See
+       dashboard.py's THEME section for the full explanation. The pill is
+       a small indicator dot next to the label, not a chip the text sits
+       inside — the label text is deliberately left alone here so it keeps
+       whatever color its context already gives it (forcing it black
+       previously made it invisible on the black sidebar). */
+    label[data-testid="stRadioOption"][data-selected="true"] div:has(+ [data-testid="stMarkdownContainer"]) {{
+        background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important;
+    }}
+    /* Both sliders on this page are in the sidebar, where the value-bubble
+       text is always cream (not adaptive) — so the thumb needs a color
+       that always contrasts with cream, i.e. brand-constant black, not
+       {TEXT} (which flips to near-white in dark mode). */
+    div[data-testid="stSlider"] div:has(> [data-testid="stSliderThumbValue"]) {{
+        background-color:{ACCENT_TEXT}!important; border-color:{ACCENT_TEXT}!important;
+    }}
+
+    button[kind="primary"] {{ background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important; }}
+    button[kind="primary"] * {{ color:{ACCENT_TEXT}!important; }}
+    button[kind="secondary"] {{ border-color:{TEXT}!important; background:{PANEL}!important; }}
+    button[kind="secondary"] * {{ color:{TEXT}!important; }}
+    div[data-testid="stFileUploader"] section {{ background:{PANEL}!important; border:1px dashed {TEXT}!important; }}
+    div[data-testid="stFileUploader"] section * {{ color:{TEXT}!important; }}
     div[data-testid="stFileUploader"] section small {{ color:{MUTED}!important; }}
-    div[data-testid="stFileUploaderDropzoneInstructions"] * {{ color:#000000!important; }}
-    div[data-testid="stFileUploader"] button {{ background:{ACCENT}!important; color:#000000!important; border-color:#000000!important; }}
-    div[data-testid="stFileUploader"] button * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-baseweb="select"] * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-baseweb="select"] input {{ color:#000000!important; }}
+    div[data-testid="stFileUploaderDropzoneInstructions"] * {{ color:{TEXT}!important; }}
+    div[data-testid="stFileUploader"] button {{ background:{ACCENT}!important; color:{ACCENT_TEXT}!important; border-color:{ACCENT_TEXT}!important; }}
+    div[data-testid="stFileUploader"] button * {{ color:{ACCENT_TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] * {{ color:{TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input {{ color:{TEXT}!important; }}
     section[data-testid="stSidebar"] div[data-baseweb="popover"] *,
-    section[data-testid="stSidebar"] div[data-baseweb="menu"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="menu"] * {{ color:{TEXT}!important; }}
     section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
-    section[data-testid="stSidebar"] div[data-baseweb="tag"] * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] button[kind="primary"] * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] button[kind="secondary"] * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] * {{ color:#000000!important; }}
-    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] * {{ color:#000000!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="tag"] * {{ color:{ACCENT_TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section * {{ color:{TEXT}!important; }}
+    section[data-testid="stSidebar"] button[kind="primary"] * {{ color:{ACCENT_TEXT}!important; }}
+    section[data-testid="stSidebar"] button[kind="secondary"] * {{ color:{TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection {{ background:{ACCENT}!important; color:{ACCENT_TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] * {{ color:{TEXT}!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] * {{ color:{TEXT}!important; }}
     section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label,
     section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label *,
     section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label,
-    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label * {{ color:#FFF4EC!important; }}
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label * {{ color:{CREAM}!important; }}
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-    div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{ background:#FFFFFF!important; }}
+    div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div {{ background:{PANEL}!important; }}
+
+    /* The upload button sits on the lime accent, so its text must win over
+       the sidebar file-uploader "section *" text-color rule above — same
+       specificity (both scoped under stSidebar + stFileUploader), so
+       placed last to win the source-order tie. */
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] button,
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] button * {{ color:{ACCENT_TEXT}!important; }}
     </style>
     """,
     unsafe_allow_html=True,

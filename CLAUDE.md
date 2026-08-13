@@ -91,6 +91,40 @@ Per the model documentation (draft doc, ask the user if you need the full write-
   notebook or the app — known open item.
 - The notebook's train/test split is a single last-month holdout, not a rolling backtest.
 
+## Theming — light/dark, follows system preference
+
+All three pages adapt to the system's light/dark preference automatically (or the user's
+manual override via Streamlit's own menu) — there is no in-app toggle; it's driven by
+`st.context.theme.type`, computed once near the top of `dashboard.py`, each page in
+`pages/`, as `_dark = st.context.theme.type == "dark"`. That flag picks the resolved hex
+value for each color token (`BG`, `PANEL`, `TEXT`, `MUTED`, `BORDER`, `UP`/`DN`/`WARN`,
+etc.), which then gets f-string-interpolated into both the injected `<style>` block and
+every inline-HTML `st.markdown(unsafe_allow_html=True)` snippet.
+
+**Why Python-resolved hex instead of CSS custom properties + `prefers-color-scheme`:**
+Altair (dashboard's trend chart), PyDeck (the map, tooltip, text labels), and Plotly
+(forecasting page's charts) all render their own SVG/canvas/WebGL outside the page's CSS
+cascade — passing them a literal `var(--x)` string as a color value doesn't resolve and
+would silently break the chart. Using one Python-side source of truth for *everything*
+(DOM CSS included) avoids maintaining two parallel theming systems and guarantees the
+charts and the surrounding page never disagree about which theme is active.
+
+**Brand-constant vs. adaptive colors:** the lime accent (`#BEFF6C`) and the decorative
+black/cream used for the sidebar, section-header bars, and the map tooltip chip stay
+identical in both themes (they're the brand identity, not a contrast-driven surface color).
+Everything else — backgrounds, panels, primary/muted text, borders, the up/down/warning
+status colors, the PyDeck basemap style (`carto`'s `light`/`dark` variant) — flips per
+theme. Status colors (`UP`/`DN`/`WARN`) get *brightened* dark-mode variants, not just
+reused, since the light-mode shades were tuned for contrast against a cream/white
+background and read as low-contrast on a near-black one.
+
+If you add a new colored element to any of these three pages, follow the same pattern:
+define it as `"<dark-hex>" if _dark else "<light-hex>"` near the other tokens, don't
+hardcode a literal hex inline. The Documentation page (no data/charts) uses a small
+subset of the same tokens purely for visual consistency with the other two pages — without
+it, it would fall back to Streamlit's generic default dark gray instead of the app's
+branded near-black.
+
 ## Collaboration notes
 
 Repo has two active contributors: the user (via Claude Code, mostly the forecasting-page

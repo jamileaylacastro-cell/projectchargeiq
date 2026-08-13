@@ -8,141 +8,209 @@ import calendar
 from pathlib import Path
 from utils.cleaning_dashboard import load_dashboard_data
 
+# ── THEME ────────────────────────────────────────────────────────────────────
+# st.context.theme.type reflects the active theme (system light/dark
+# preference by default, or the user's manual override via the Streamlit
+# menu) and is available on every rerun, including the first. It's the
+# single source of truth for color choices below — used both for the CSS
+# injected into the page AND for Altair/PyDeck chart colors, since chart
+# libraries render their own SVG/canvas and can't consume page CSS
+# (custom properties / prefers-color-scheme don't reach into them).
+_dark = st.context.theme.type == "dark"
+
+# Brand-constant colors — identical in both themes (the lime/black/cream
+# identity), as opposed to the tokens below which flip for contrast.
+BLACK       = "#000000"   # decorative: sidebar bg, section-header bg, map tooltip bg
+CREAM       = "#FFF4EC"   # decorative: sidebar text, map tooltip text
+ACCENT      = "#BEFF6C"   # lime brand accent
+ACCENT_TEXT = "#000000"   # text/border sitting on the lime accent — reads fine on lime either way
+
+# Theme-adaptive tokens
+BG        = "#15140F" if _dark else "#FFF4EC"
+PANEL     = "#211F17" if _dark else "#FFFFFF"
+PANEL_ALT = "#3A2E14" if _dark else "#FEF3DC"
+BORDER    = "#3A3628" if _dark else "#EAE0D0"
+TEXT      = "#F3F1E9" if _dark else "#000000"
+MUTED     = "#B8B2A0" if _dark else "#5C574D"
+SHADOW    = "rgba(0,0,0,.5)" if _dark else "rgba(0,0,0,.07)"
+UP        = "#8FCB3E" if _dark else "#4F7A1E"
+DN        = "#E6675F" if _dark else "#C1443E"
+WARN      = "#D9A83D" if _dark else "#A8710A"
+GRID_LINE = "#6B6656" if _dark else "#A1A1A1"   # Altair month-break rule
+MAP_STYLE = "dark" if _dark else "light"         # CARTO basemap
+
 # ── BRAND PALETTE ────────────────────────────────────────────────────────────
 # Lime #BEFF6C · Cream #FFF4EC · White #FFFFFF · Black #000000 (accent)
-st.markdown("""
+# Colors below are theme-adaptive (see THEME section above) except the brand
+# constants (lime accent, and black/cream used decoratively for the sidebar
+# and section headers, which stay constant in both light and dark).
+st.markdown(f"""
 <style>
-.stApp{background:#FFF4EC}
-[data-testid="stAppViewContainer"] > .main { padding-top: 0 !important; }
-div.block-container { padding-top: 0.5rem !important; }
-section[data-testid="stSidebar"]{background:#000000}
-section[data-testid="stSidebar"] *{color:#FFF4EC!important}
+.stApp{{background:{BG}}}
+[data-testid="stAppViewContainer"] > .main {{ padding-top: 0 !important; }}
+div.block-container {{ padding-top: 0.5rem !important; }}
+section[data-testid="stSidebar"]{{background:{BLACK}}}
+section[data-testid="stSidebar"] *{{color:{CREAM}!important}}
 section[data-testid="stSidebar"] h1,
 section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3{color:#BEFF6C!important}
-.kpi-card{background:#fff;border-radius:6px;padding:14px 16px;
-  border-left:4px solid #000000;box-shadow:0 1px 6px rgba(0,0,0,.07);height:100%}
-.kpi-label{font-size:10px;color:#5C574D;text-transform:uppercase;
-  letter-spacing:.06em;margin-bottom:3px}
-.kpi-value{font-size:22px;font-weight:700;color:#000000;line-height:1}
-.kpi-trend{font-size:10px;margin-top:3px}
-.up{color:#4F7A1E}.dn{color:#C1443E}.warn{color:#A8710A}
-.sec-hdr{background:#000000;color:#BEFF6C;padding:7px 14px;border-radius:4px;
-  font-size:12px;font-weight:700;margin:16px 0 8px 0}
-.row-hdr{font-size:10px;font-weight:700;color:#5C574D;text-transform:uppercase;
-  letter-spacing:.06em;margin:10px 0 6px 2px}
-.formula-box{background:#FFFFFF;border:1px solid #EAE0D0;border-radius:6px;
+section[data-testid="stSidebar"] h3{{color:{ACCENT}!important}}
+.kpi-card{{background:{PANEL};border-radius:6px;padding:14px 16px;
+  border-left:4px solid {TEXT};box-shadow:0 1px 6px {SHADOW};height:100%}}
+.kpi-label{{font-size:10px;color:{MUTED};text-transform:uppercase;
+  letter-spacing:.06em;margin-bottom:3px}}
+.kpi-value{{font-size:22px;font-weight:700;color:{TEXT};line-height:1}}
+.kpi-trend{{font-size:10px;margin-top:3px}}
+.up{{color:{UP}}}.dn{{color:{DN}}}.warn{{color:{WARN}}}
+.sec-hdr{{background:{BLACK};color:{ACCENT};padding:7px 14px;border-radius:4px;
+  font-size:12px;font-weight:700;margin:16px 0 8px 0}}
+.row-hdr{{font-size:10px;font-weight:700;color:{MUTED};text-transform:uppercase;
+  letter-spacing:.06em;margin:10px 0 6px 2px}}
+.formula-box{{background:{PANEL};border:1px solid {BORDER};border-radius:6px;
   padding:10px 14px;font-family:monospace;font-size:11px;
-  color:#000000;white-space:pre-line;line-height:1.7}
+  color:{TEXT};white-space:pre-line;line-height:1.7}}
 
 /* ── Kill Streamlit's default red accents; guarantee readable text on
-     every light/lime background, even inside the black sidebar ──────── */
+     every panel/accent background, even inside the black sidebar ──────── */
 
 /* Multiselect / tag pills — force the accent (lime) background and black text
      across a range of possible widget DOM variations to override any red/error
-     variant styling that may appear in some Streamlit/BaseWeb versions. */
+     variant styling that may appear in some Streamlit/BaseWeb versions.
+     Tags sit ON the lime accent, so their border/text stay brand-constant
+     black regardless of theme. */
 span[data-baseweb="tag"], div[data-baseweb="tag"],
 div[class*="tags"], span[class*="tags"],
 div[class*="tag"], span[class*="tag"],
-button[aria-label*="remove"], button[aria-label*="close"]{
-    background-color:#BEFF6C!important; border-color:#000000!important; color:#000000!important;
-}
+button[aria-label*="remove"], button[aria-label*="close"]{{
+    background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important; color:{ACCENT_TEXT}!important;
+}}
 span[data-baseweb="tag"] *, div[data-baseweb="tag"] *,
-div[class*="tag"] *, span[class*="tag"] *{ color:#000000!important; }
+div[class*="tag"] *, span[class*="tag"] *{{ color:{ACCENT_TEXT}!important; }}
 span[data-baseweb="tag"] svg, div[data-baseweb="tag"] svg,
-button[aria-label*="remove"] svg, button[aria-label*="close"] svg{ fill:#000000!important; }
+button[aria-label*="remove"] svg, button[aria-label*="close"] svg{{ fill:{ACCENT_TEXT}!important; }}
 
-/* Select / multiselect closed box — white bg, black text, no red focus ring */
-div[data-baseweb="select"] > div{
-  border-color:#EAE0D0!important; background:#FFFFFF!important;
+/* Select / multiselect closed box — panel bg, adaptive text, no red focus ring */
+div[data-baseweb="select"] > div{{
+  border-color:{BORDER}!important; background:{PANEL}!important;
   outline:none!important;
-}
-div[data-baseweb="select"] > div *{ color:#000000!important; }
+}}
+div[data-baseweb="select"] > div *{{ color:{TEXT}!important; }}
 div[data-baseweb="select"]:focus-within > div,
 div[data-baseweb="select"] > div:focus,
-div[data-baseweb="select"] > div:focus-within{
-  border-color:#BEFF6C!important; box-shadow:0 0 0 1px #BEFF6C!important;
-  background:#FFFFFF!important; outline:none!important;
-}
-div[data-baseweb="select"] input{ outline:none!important; box-shadow:none!important; }
-div[data-baseweb="select"] input::selection{ background:#BEFF6C!important; color:#000000!important; }
+div[data-baseweb="select"] > div:focus-within{{
+  border-color:{ACCENT}!important; box-shadow:0 0 0 1px {ACCENT}!important;
+  background:{PANEL}!important; outline:none!important;
+}}
+div[data-baseweb="select"] input{{ outline:none!important; box-shadow:none!important; }}
+div[data-baseweb="select"] input::selection{{ background:{ACCENT}!important; color:{ACCENT_TEXT}!important; }}
 
-/* Dropdown option list — white bg by default, lime on hover/selected,
-   text always black regardless of sidebar's cream override */
-div[data-baseweb="popover"], div[data-baseweb="menu"]{ background:#FFFFFF!important; }
-div[data-baseweb="popover"] *, div[data-baseweb="menu"] *{ color:#000000!important; }
-div[data-baseweb="popover"] li, div[data-baseweb="menu"] li{ background:#FFFFFF!important; }
+/* Dropdown option list — panel bg by default, lime on hover/selected,
+   text always adaptive regardless of sidebar's cream override */
+div[data-baseweb="popover"], div[data-baseweb="menu"]{{ background:{PANEL}!important; }}
+div[data-baseweb="popover"] *, div[data-baseweb="menu"] *{{ color:{TEXT}!important; }}
+div[data-baseweb="popover"] li, div[data-baseweb="menu"] li{{ background:{PANEL}!important; }}
 div[data-baseweb="popover"] li:hover, div[data-baseweb="menu"] li:hover,
 div[data-baseweb="popover"] li[aria-selected="true"],
-div[data-baseweb="menu"] li[aria-selected="true"]{
-  background-color:#BEFF6C!important;
-}
+div[data-baseweb="menu"] li[aria-selected="true"]{{
+  background-color:{ACCENT}!important;
+}}
 div[data-baseweb="popover"] li:hover *, div[data-baseweb="menu"] li:hover *,
 div[data-baseweb="popover"] li[aria-selected="true"] *,
-div[data-baseweb="menu"] li[aria-selected="true"] *{ color:#000000!important; }
+div[data-baseweb="menu"] li[aria-selected="true"] *{{ color:{ACCENT_TEXT}!important; }}
 
-/* Radio buttons — style only the native input dot, not the row wrapper */
-input[type="checkbox"], input[type="radio"]{ accent-color:#BEFF6C!important; }
+/* Radio buttons — style only the native input dot, not the row wrapper.
+   Newer Streamlit builds hide the native <input type="radio"> and render a
+   custom segmented-control "pill" for the selected option instead (no more
+   role="radio" dot to theme via accent-color), so that pill needs its own
+   override below or it falls back to Streamlit's default red. */
+input[type="checkbox"], input[type="radio"]{{ accent-color:{ACCENT}!important; }}
+
+/* Selected st.radio() "pill" (horizontal or vertical) — targeted structurally
+   via :has() since its actual class names are unstable per-build hashes.
+   The pill is the sibling immediately before the option's text container —
+   a small indicator dot next to the label, NOT a chip the text sits inside,
+   so only the pill itself gets the brand-constant lime/black treatment.
+   The label text is deliberately left alone here: it must keep whatever
+   color its surrounding context already gives it (cream in the sidebar via
+   the blanket rule above, Streamlit's own adaptive text color elsewhere) —
+   an earlier version of this rule also forced the text to black, which
+   made it invisible against the sidebar's black background. */
+label[data-testid="stRadioOption"][data-selected="true"] div:has(+ [data-testid="stMarkdownContainer"]){{
+  background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important;
+}}
 
 /* Slider — thumb only; no track/rail background override (was painting
-   a much wider box than intended, covering the min/max value labels) */
-div[data-testid="stSlider"] div[role="slider"]{
-  background-color:#000000!important; border-color:#000000!important;
-}
+   a much wider box than intended, covering the min/max value labels).
+   Newer Streamlit builds dropped the role="slider" attribute from the
+   thumb element, so it's targeted structurally via :has() instead —
+   it's the div that directly wraps the thumb's value-bubble element.
+   Every slider in this app lives in the sidebar, where the value-bubble
+   text is always cream (not adaptive) — so the thumb needs a color that
+   always contrasts with cream, i.e. brand-constant black, not the {TEXT}
+   token (which flips to near-white in dark mode and would make the
+   bubble text vanish against its own thumb). */
+div[data-testid="stSlider"] div:has(> [data-testid="stSliderThumbValue"]){{
+  background-color:{ACCENT_TEXT}!important; border-color:{ACCENT_TEXT}!important;
+}}
 
 /* Buttons — cover the inner text node too, not just the button element,
    since Streamlit wraps button text in its own <p>/<span> that the
    sidebar's blanket cream-text rule matches directly and wins by
-   default inheritance rules unless explicitly overridden here */
-button[kind="primary"]{ background-color:#BEFF6C!important; border-color:#000000!important; }
-button[kind="primary"] *{ color:#000000!important; }
-button[kind="secondary"]{ border-color:#000000!important; background:#FFFFFF!important; }
-button[kind="secondary"] *{ color:#000000!important; }
+   default inheritance rules unless explicitly overridden here.
+   Primary sits on lime (brand-constant); secondary sits on the panel
+   surface, so it uses the adaptive text/panel tokens. */
+button[kind="primary"]{{ background-color:{ACCENT}!important; border-color:{ACCENT_TEXT}!important; }}
+button[kind="primary"] *{{ color:{ACCENT_TEXT}!important; }}
+button[kind="secondary"]{{ border-color:{TEXT}!important; background:{PANEL}!important; }}
+button[kind="secondary"] *{{ color:{TEXT}!important; }}
 
-/* File uploader — light bg, so force black text regardless of container */
-div[data-testid="stFileUploader"] section{
-  background:#FFFFFF!important; border:1px dashed #000000!important;
-}
-div[data-testid="stFileUploader"] section *{ color:#000000!important; }
-div[data-testid="stFileUploader"] section small{ color:#5C574D!important; }
-div[data-testid="stFileUploaderDropzoneInstructions"] *{ color:#000000!important; }
-div[data-testid="stFileUploader"] button{
-  background:#BEFF6C!important; color:#000000!important; border-color:#000000!important;
-}
-div[data-testid="stFileUploader"] button *{ color:#000000!important; }
+/* File uploader — panel bg, adaptive text/border */
+div[data-testid="stFileUploader"] section{{
+  background:{PANEL}!important; border:1px dashed {TEXT}!important;
+}}
+div[data-testid="stFileUploader"] section *{{ color:{TEXT}!important; }}
+div[data-testid="stFileUploader"] section small{{ color:{MUTED}!important; }}
+div[data-testid="stFileUploaderDropzoneInstructions"] *{{ color:{TEXT}!important; }}
+div[data-testid="stFileUploader"] button{{
+  background:{ACCENT}!important; color:{ACCENT_TEXT}!important; border-color:{ACCENT_TEXT}!important;
+}}
+div[data-testid="stFileUploader"] button *{{ color:{ACCENT_TEXT}!important; }}
 
 /* ── Sidebar-scoped overrides — higher specificity than the blanket
-     cream-text rule above, so anything sitting on a light/white
-     background inside the black sidebar still reads in black ────────── */
-section[data-testid="stSidebar"] div[data-baseweb="select"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] div[data-baseweb="select"] input{ color:#000000!important; }
+     cream-text rule above, so anything sitting on a panel-colored
+     background inside the black sidebar still reads legibly ────────── */
+section[data-testid="stSidebar"] div[data-baseweb="select"] *{{ color:{TEXT}!important; }}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input{{ color:{TEXT}!important; }}
 section[data-testid="stSidebar"] div[data-baseweb="popover"] *,
-section[data-testid="stSidebar"] div[data-baseweb="menu"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
-section[data-testid="stSidebar"] div[data-baseweb="tag"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section *{ color:#000000!important; }
-section[data-testid="stSidebar"] button[kind="primary"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] button[kind="secondary"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection{
-  background:#BEFF6C!important; color:#000000!important;
-}
+section[data-testid="stSidebar"] div[data-baseweb="menu"] *{{ color:{TEXT}!important; }}
+section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section *{{ color:{TEXT}!important; }}
+section[data-testid="stSidebar"] button[kind="primary"] *{{ color:{ACCENT_TEXT}!important; }}
+section[data-testid="stSidebar"] button[kind="secondary"] *{{ color:{TEXT}!important; }}
+section[data-testid="stSidebar"] div[data-baseweb="select"] input::selection{{
+  background:{ACCENT}!important; color:{ACCENT_TEXT}!important;
+}}
 
 /* ── FINAL PASS — target Streamlit's own stable widget wrappers directly.
      These data-testid values are assigned by Streamlit itself (not the
      BaseWeb internals, which can nest differently across versions), so
-     this is the most reliable way to guarantee black text survives on
-     every light-background widget inside the black sidebar. Placed last
-     so it also wins any same-specificity source-order tie. ─────────── */
-section[data-testid="stSidebar"] div[data-testid="stSelectbox"] *{ color:#000000!important; }
-section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] *{ color:#000000!important; }
+     this is the most reliable way to guarantee legible text on every
+     panel-background widget inside the black sidebar. Placed last so
+     it also wins any same-specificity source-order tie. ─────────── */
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] *{{ color:{TEXT}!important; }}
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] *{{ color:{TEXT}!important; }}
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label,
 section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label *,
 section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label,
-section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label *{ color:#FFF4EC!important; }
+section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label *{{ color:{CREAM}!important; }}
 div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div{
-  background:#FFFFFF!important;
-}
+div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div{{
+  background:{PANEL}!important;
+}}
+
+/* Tag pills sit on the lime accent, so their text must win over the
+   blanket stMultiSelect/stSelectbox text-color rules just above — same
+   specificity, so placed last to win the source-order tie. */
+section[data-testid="stSidebar"] span[data-baseweb="tag"] *,
+section[data-testid="stSidebar"] div[data-baseweb="tag"] *{{ color:{ACCENT_TEXT}!important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -195,8 +263,8 @@ if not st.session_state.chargeiq_data_ready:
         st.markdown("<div style='font-size:34px;text-align:center;margin-top:2px'>⚡</div>",
                     unsafe_allow_html=True)
     with col_ttl:
-        st.markdown("<h2 style='margin:0;color:#000000'>Project ChargeIQ</h2>"
-                    "<p style='margin:0;color:#5C574D;font-size:12px'>"
+        st.markdown(f"<h2 style='margin:0;color:{TEXT}'>Project ChargeIQ</h2>"
+                    f"<p style='margin:0;color:{MUTED};font-size:12px'>"
                     "Provide your data to begin — upload files below or use the bundled dataset.</p>",
                     unsafe_allow_html=True)
     st.markdown("---")
@@ -343,14 +411,18 @@ with st.sidebar:
         st.session_state.chargeiq_data_ready = False
         st.rerun()
 
-st.markdown("---")
-days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
-n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
-src_label = "Bundled data" if n_uploaded == 0 else f"{n_uploaded}/6 files uploaded"
-st.markdown(f"<small style='color:#FFF4EC'>Period: **{sel_month}**<br>"
-            f"Active days: **{days_in_month}**<br>"
-            f"Source: {src_label}</small>",
-            unsafe_allow_html=True)
+    # Kept inside the sidebar (not the main content area) — this summary
+    # text is explicitly colored for the sidebar's black background, and
+    # would be unreadable (cream-on-cream) sitting on the light-mode main
+    # page background instead.
+    st.markdown("---")
+    days_in_month = tx[tx["MONTH"] == sel_month]["DATE"].nunique()
+    n_uploaded = sum(1 for k in FILE_DEFAULTS if st.session_state.get(f"gate_up_{k}") is not None)
+    src_label = "Bundled data" if n_uploaded == 0 else f"{n_uploaded}/6 files uploaded"
+    st.markdown(f"<small style='color:{CREAM}'>Period: **{sel_month}**<br>"
+                f"Active days: **{days_in_month}**<br>"
+                f"Source: {src_label}</small>",
+                unsafe_allow_html=True)
 
 # ── PER-STATION OPERATING HOURS ─────────────────────────────────────────────
 # Real business hours from Station Profile, not one manual number applied
@@ -363,7 +435,7 @@ def _parse_time_minutes(val):
         return None
     parsed = pd.to_datetime(str(val), errors="coerce")
     return parsed.hour * 60 + parsed.minute if pd.notna(parsed) else None
- 
+
 def _station_daily_hours(station_name):
     """Returns (hours, used_fallback)."""
     if force_24:
@@ -383,7 +455,7 @@ def _station_daily_hours(station_name):
     if hrs <= 0:
         hrs += 24  # overnight wraparound — end time is technically after midnight
     return round(hrs, 2), False
- 
+
 _station_hours_results = {s: _station_daily_hours(s) for s in tx["STATIONNAME"].dropna().unique()}
 station_hours   = {s: v[0] for s, v in _station_hours_results.items()}
 _uses_fallback  = {s for s, v in _station_hours_results.items() if v[1]}
@@ -495,8 +567,8 @@ with col_ttl:
         _hrs_label = f"{station_hours.get(sel_stations[0], op_hours_fallback):.1f}h/day"
         if sel_stations[0] in _uses_fallback:
             _hrs_label += " (fallback)"
-    st.markdown(f"<h2 style='margin:0;color:#000000'>Project ChargeIQ — {title}</h2>"
-                f"<p style='margin:0;color:#5C574D;font-size:11px'>"
+    st.markdown(f"<h2 style='margin:0;color:{TEXT}'>Project ChargeIQ — {title}</h2>"
+                f"<p style='margin:0;color:{MUTED};font-size:11px'>"
                 f"{sel_month} · {days} active days · Op hrs: {_hrs_label}</p>",
                 unsafe_allow_html=True)
 st.markdown("---")
@@ -571,60 +643,60 @@ if not is_company:
                          .mean().round(2).sort_index())
         rate_rows = "".join(
             f"<div style='display:flex;justify-content:space-between;font-size:11px;"
-            f"padding:3px 0;border-bottom:1px solid #EAE0D0'>"
-            f"<span style='color:#5C574D'>{plug}</span>"
-            f"<span style='color:#000;font-weight:600'>₱{rate:,.2f} / kWh</span></div>"
+            f"padding:3px 0;border-bottom:1px solid {BORDER}'>"
+            f"<span style='color:{MUTED}'>{plug}</span>"
+            f"<span style='color:{TEXT};font-weight:600'>₱{rate:,.2f} / kWh</span></div>"
             for plug, rate in _rate_by_plug.items()
         )
     else:
-        rate_rows = "<div style='font-size:11px;color:#5C574D'>No rate data available</div>"
+        rate_rows = f"<div style='font-size:11px;color:{MUTED}'>No rate data available</div>"
 
-    status_color = "#4F7A1E" if is_active else "#C1443E"
+    status_color = UP if is_active else DN
     status_label = "🟢 Active" if is_active else "🔴 Inactive"
 
     st.markdown(f"""
-    <div style='background:#fff;border-radius:8px;padding:16px 20px;
-                border-left:4px solid #000000;box-shadow:0 1px 6px rgba(0,0,0,.07);
+    <div style='background:{PANEL};border-radius:8px;padding:16px 20px;
+                border-left:4px solid {TEXT};box-shadow:0 1px 6px {SHADOW};
                 margin-bottom:16px'>
-      <div style='font-size:14px;font-weight:700;color:#000;margin-bottom:12px'>
+      <div style='font-size:14px;font-weight:700;color:{TEXT};margin-bottom:12px'>
         🏪 Station Profile — {_station}
       </div>
       <div style='display:grid;grid-template-columns:repeat(4,1fr);gap:14px 24px'>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Station Name</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{_station}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Station Name</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{_station}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Region / City</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{region_city}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Region / City</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{region_city}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Status</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Status</div>
           <div style='font-size:13px;color:{status_color};font-weight:600'>{status_label}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Operating Hours</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{op_hrs_display}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Operating Hours</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{op_hrs_display}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Year of First Operation</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{first_year if first_year else '—'}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Year of First Operation</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{first_year if first_year else '—'}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Year of Last Operation</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{last_op_display}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Year of Last Operation</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{last_op_display}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Number of Charge Points</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{n_charge_points}</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Number of Charge Points</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{n_charge_points}</div>
         </div>
         <div>
-          <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em'>Avg Charger Capacity</div>
-          <div style='font-size:13px;color:#000;font-weight:600'>{avg_capacity:,.1f} kW</div>
+          <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em'>Avg Charger Capacity</div>
+          <div style='font-size:13px;color:{TEXT};font-weight:600'>{avg_capacity:,.1f} kW</div>
         </div>
       </div>
-      <hr style='margin:14px 0 10px;border-color:#EAE0D0'>
-      <div style='font-size:9px;color:#5C574D;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>
+      <hr style='margin:14px 0 10px;border-color:{BORDER}'>
+      <div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>
         Rate per kWh by Plug Type
       </div>
       <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:0 24px'>
@@ -643,10 +715,10 @@ with st.expander("📐 Energy-Based Utilization Formula", expanded=False):
         _hrs_note = f"× {_sh:.1f} hrs/day"
         if sel_stations[0] in _uses_fallback:
             _hrs_note += f" (fallback — no valid Business Hours on file for this station)"
- 
+
     st.markdown(f"""<div class='formula-box'>
 Utilization Rate (%) = Σ Actual kWh Charged ÷ Total Available Capacity × 100
- 
+
 Σ Actual kWh Charged     = {actual_kwh:,.1f} kWh  (ENERGY_KWH where ISERROR=0)
 Total Available Capacity = Σ per station [ Online Connectors × CAPACITY_KW {_hrs_note} × {days} days ]
                          = {total_avail_kwh:,.0f} kWh
@@ -679,7 +751,9 @@ Gap vs {target_util}% target   = {util_gap:+.1f} pp
         )
 
 # ── KPI HELPER ────────────────────────────────────────────────────────────────
-def kpi(col, label, value, trend, tclass="up", border="#000000"):
+def kpi(col, label, value, trend, tclass="up", border=None):
+    if border is None:
+        border = TEXT
     col.markdown(
         f"<div class='kpi-card' style='border-left-color:{border}'>"
         f"<div class='kpi-label'>{label}</div>"
@@ -744,7 +818,7 @@ def _row_hdr_with_leaderboard(title, key):
     tag = _leaderboard.get(key) if is_company else None
     if tag:
         st.markdown(f"<div class='row-hdr'>{title} &nbsp;·&nbsp; "
-                    f"<span style='color:#4F7A1E;text-transform:none;font-weight:700'>{tag}</span></div>",
+                    f"<span style='color:{UP};text-transform:none;font-weight:700'>{tag}</span></div>",
                     unsafe_allow_html=True)
     else:
         st.markdown(f"<div class='row-hdr'>{title}</div>", unsafe_allow_html=True)
@@ -755,16 +829,16 @@ r1c1,r1c2,r1c3,r1c4 = st.columns(4)
 gap_cls = "up" if util_gap >= 0 else ("warn" if util_gap >= -10 else "dn")
 kpi(r1c1,"Network Utilization",f"{net_util:.1f}%",
     f"{'▲' if util_gap>=0 else '▼'} {util_gap:+.1f} pp vs {target_util}% target",
-    gap_cls, "#BEFF6C" if util_gap>=0 else "#C1443E")
+    gap_cls, ACCENT if util_gap>=0 else DN)
 kpi(r1c2,"Actual kWh Charged",f"{actual_kwh:,.0f}",
     f"{'▲' if actual_kwh>prior_kwh else '▼'} vs prior month",
-    "up" if actual_kwh>=prior_kwh else "dn","#BEFF6C")
+    "up" if actual_kwh>=prior_kwh else "dn",ACCENT)
 kpi(r1c3,"Avg Session Duration",f"{avg_dur:.0f} min",
     f"Peak hour: {peak_hour:02d}:00 ({peak_share:.0f}% of daily kWh)",
-    "up","#BEFF6C")
+    "up",ACCENT)
 kpi(r1c4,"Total Sessions",f"{total_sess:,}",
     f"{'▲' if mom_sess>=0 else '▼'} {abs(mom_sess):.1f}% MoM",
-    "up" if mom_sess>=0 else "dn","#BEFF6C")
+    "up" if mom_sess>=0 else "dn",ACCENT)
 
 # ── ROW 2: RELIABILITY ───────────────────────────────────────────────────────
 _row_hdr_with_leaderboard("Reliability", "uptime")
@@ -772,55 +846,55 @@ r2c1,r2c2,r2c3,r2c4 = st.columns(4)
 kpi(r2c1,"Charger Uptime",f"{uptime_pct:.1f}%",
     f"{online_cps}/{total_cps} connectors online",
     "up" if uptime_pct>=90 else ("warn" if uptime_pct>=75 else "dn"),
-    "#BEFF6C" if uptime_pct>=90 else ("#A8710A" if uptime_pct>=75 else "#C1443E"))
+    ACCENT if uptime_pct>=90 else (WARN if uptime_pct>=75 else DN))
 kpi(r2c2,"Chargers Offline",f"{offline_cps}",
     f"of {total_cps} total connectors",
     "up" if offline_cps==0 else "dn",
-    "#BEFF6C" if offline_cps==0 else "#C1443E")
+    ACCENT if offline_cps==0 else DN)
 kpi(r2c3,"Faulty Connectors",f"{faulty_cps}",
     "Flagged in Charge Point Info",
     "up" if faulty_cps==0 else "dn",
-    "#BEFF6C" if faulty_cps==0 else "#C1443E")
+    ACCENT if faulty_cps==0 else DN)
 kpi(r2c4,"Error Session Rate",f"{error_rate:.1f}%",
     "▼ needs attention" if error_rate>5 else "Within threshold",
-    "dn" if error_rate>5 else "up","#C1443E" if error_rate>5 else "#BEFF6C")
+    "dn" if error_rate>5 else "up",DN if error_rate>5 else ACCENT)
 
 # ── ROW 3: REVENUE ───────────────────────────────────────────────────────────
 _row_hdr_with_leaderboard("Revenue", "revenue")
 r3c1,r3c2,r3c3,r3c4 = st.columns(4)
 kpi(r3c1,"Total Revenue",f"₱{total_rev:,.0f}",
     f"{'▲' if mom_rev>=0 else '▼'} {abs(mom_rev):.1f}% MoM",
-    "up" if mom_rev>=0 else "dn","#BEFF6C")
+    "up" if mom_rev>=0 else "dn",ACCENT)
 kpi(r3c2,"Avg Revenue / Session",f"₱{avg_rev_session:,.0f}",
     f"{total_sess:,} sessions this period",
-    "up","#BEFF6C")
+    "up",ACCENT)
 kpi(r3c3,"Refund Rate",f"{refund_rate:.1f}%",
     f"{refund_count:,} of {refund_total:,} wallet txns",
-    "dn" if refund_rate>3 else "up","#C1443E" if refund_rate>3 else "#BEFF6C")
+    "dn" if refund_rate>3 else "up",DN if refund_rate>3 else ACCENT)
 if overstay_rev is not None:
     kpi(r3c4,"Overstay Fee Revenue",f"₱{overstay_rev:,.0f}",
-        "Parking demand signal","up","#BEFF6C")
+        "Parking demand signal","up",ACCENT)
 else:
     kpi(r3c4,"Overstay Fee Revenue","—",
-        "OVERSTAYFEE column not found","warn","#A8710A")
+        "OVERSTAYFEE column not found","warn",WARN)
 
 # ── ROW 4: CUSTOMER ──────────────────────────────────────────────────────────
 _row_hdr_with_leaderboard("Customer", "repeat")
 r4c1,r4c2,r4c3,r4c4 = st.columns(4)
 if is_company:
-    kpi(r4c1,"Registered Users",f"{len(ud):,}",f"{active:,} active accounts","up","#000000")
+    kpi(r4c1,"Registered Users",f"{len(ud):,}",f"{active:,} active accounts","up",TEXT)
     kpi(r4c2,"Active Users (period)",f"{unique_customers:,}",
-        "Distinct users this month","up","#BEFF6C")
+        "Distinct users this month","up",ACCENT)
     kpi(r4c3,"Repeat Customer Rate",f"{repeat_rate:.1f}%",
-        f"{repeat_customers:,} of {unique_customers:,} customers","up","#BEFF6C")
-    kpi(r4c4,"Avg Wallet Balance",f"₱{avg_wallet:,.0f}","Across active users","up","#000000")
+        f"{repeat_customers:,} of {unique_customers:,} customers","up",ACCENT)
+    kpi(r4c4,"Avg Wallet Balance",f"₱{avg_wallet:,.0f}","Across active users","up",TEXT)
 else:
-    kpi(r4c1,"Unique Customers",f"{unique_customers:,}","At this site this month","up","#000000")
+    kpi(r4c1,"Unique Customers",f"{unique_customers:,}","At this site this month","up",TEXT)
     kpi(r4c2,"Repeat Customer Rate",f"{repeat_rate:.1f}%",
-        f"{repeat_customers:,} of {unique_customers:,} customers","up","#BEFF6C")
-    kpi(r4c3,"Avg Revenue / Customer",f"₱{avg_rev_per_cust:,.0f}","This site, this month","up","#BEFF6C")
+        f"{repeat_customers:,} of {unique_customers:,} customers","up",ACCENT)
+    kpi(r4c3,"Avg Revenue / Customer",f"₱{avg_rev_per_cust:,.0f}","This site, this month","up",ACCENT)
     top_pm = df_all["PAYMENT_METHOD"].value_counts().index[0] if len(df_all) and "PAYMENT_METHOD" in df_all.columns else "—"
-    kpi(r4c4,"Top Payment Method",top_pm,"Most used at this site","up","#000000")
+    kpi(r4c4,"Top Payment Method",top_pm,"Most used at this site","up",TEXT)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -843,11 +917,11 @@ with cb1:
     st.markdown("**Energy (kWh) by Charging Mode**")
     ct = df.groupby("CHARGE_TYPE")["ENERGY_KWH"].sum().reset_index()
     ct.columns = ["Charging Mode","kWh"]
-    if len(ct): st.bar_chart(ct.set_index("Charging Mode"), color="#BEFF6C", height=200)
+    if len(ct): st.bar_chart(ct.set_index("Charging Mode"), color=ACCENT, height=200)
 with cb2:
     st.markdown("**Payment Method Mix**")
     pm = df_all.groupby("PAYMENT_METHOD").size().reset_index(name="Count")
-    if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color="#000000", height=200)
+    if len(pm): st.bar_chart(pm.set_index("PAYMENT_METHOD"), color=TEXT, height=200)
 
 st.markdown("<div class='row-hdr'>Wallet Top-Up</div>", unsafe_allow_html=True)
 _has_type = "TRANSACTION_TYPE" in wt.columns
@@ -875,15 +949,15 @@ else:
         _med_topup = _topups["AMOUNT"].median()
         _n_topups  = len(_topups)
         _n_topup_users = _topups["USERID"].nunique()
-        kpi(wc1, "Avg Top-Up Amount", f"₱{_avg_topup:,.0f}", f"Median: ₱{_med_topup:,.0f}", "up", "#BEFF6C")
-        kpi(wc2, "Total Top-Ups", f"{_n_topups:,}", f"{_n_topup_users:,} unique users", "up", "#BEFF6C")
+        kpi(wc1, "Avg Top-Up Amount", f"₱{_avg_topup:,.0f}", f"Median: ₱{_med_topup:,.0f}", "up", ACCENT)
+        kpi(wc2, "Total Top-Ups", f"{_n_topups:,}", f"{_n_topup_users:,} unique users", "up", ACCENT)
         kpi(wc3, "Top-Ups per User", f"{(_n_topups/_n_topup_users):.1f}" if _n_topup_users else "—",
-            "Avg completed top-ups per user", "up", "#000000")
+            "Avg completed top-ups per user", "up", TEXT)
         if "PAYMENT_METHOD" in _topups.columns and len(_topups):
             _top_method = _topups["PAYMENT_METHOD"].value_counts().index[0]
-            kpi(wc4, "Top Funding Method", _top_method, "Most used for top-ups", "up", "#000000")
+            kpi(wc4, "Top Funding Method", _top_method, "Most used for top-ups", "up", TEXT)
         else:
-            kpi(wc4, "Top Funding Method", "—", "PAYMENT_METHOD not found", "warn", "#A8710A")
+            kpi(wc4, "Top Funding Method", "—", "PAYMENT_METHOD not found", "warn", WARN)
 
 
 # ── UTILIZATION TREND — daily line across the full available date range,
@@ -891,13 +965,13 @@ else:
 #    Company view aggregates across the selected stations; Host Partner
 #    view is naturally single-station since sel_stations has one entry.
 st.markdown("<div class='sec-hdr'>📈 Utilization Trend</div>", unsafe_allow_html=True)
- 
+
 _trend_base = tx[
     (tx["STATIONNAME"].isin(sel_stations)) &
     (tx["CHARGE_TYPE"].isin(charge_types)) &
     (~tx["ISERROR"].astype(bool))
 ].copy()
- 
+
 if len(_trend_base):
     _daily_kwh = _trend_base.groupby("DATE")["ENERGY_KWH"].sum()
     # Same connector set used for the KPI-row denominator, held constant
@@ -911,7 +985,7 @@ if len(_trend_base):
         * station_hours.get(s, op_hours_fallback)
         for s in cp_sel_online["STATIONNAME"].unique()
     )
-    _daily_util = (_daily_kwh / _trend_cap_kwh_per_day * 100).round(1) if _trend_cap_kwh_per_day > 0 else _daily_kwh * 0    
+    _daily_util = (_daily_kwh / _trend_cap_kwh_per_day * 100).round(1) if _trend_cap_kwh_per_day > 0 else _daily_kwh * 0
     _trend_df = _daily_util.reset_index()
     _trend_df.columns = ["Date", "Utilization %"]
     _trend_df = _trend_df.sort_values("Date")
@@ -945,14 +1019,14 @@ if len(_trend_base):
         )
         month_breaks = _trend_plot["Month"].drop_duplicates().sort_values().tolist()
 
-        line = alt.Chart(_trend_plot).mark_line(color="#BEFF6C", strokeWidth=3).encode(
+        line = alt.Chart(_trend_plot).mark_line(color=ACCENT, strokeWidth=3).encode(
             x=alt.X("Date:T", title="Date"),
             y=alt.Y("Utilization %:Q", title="Utilization %"),
             tooltip=[alt.Tooltip("Date:T", title="Date"),
                      alt.Tooltip("Utilization %:Q", title="Utilization %")]
         )
 
-        rules = alt.Chart(pd.DataFrame({"Date": month_breaks})).mark_rule(color="#A1A1A1", strokeDash=[4,4]).encode(
+        rules = alt.Chart(pd.DataFrame({"Date": month_breaks})).mark_rule(color=GRID_LINE, strokeDash=[4,4]).encode(
             x="Date:T"
         )
 
@@ -1016,6 +1090,9 @@ if is_company:
             center_lon = map_df["LONGITUDE"].mean()
             view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon,
                                        zoom=9.5, pitch=35 if "Bubble" in map_mode else 0)
+            # Text labels drawn directly on the basemap need to flip with it —
+            # black labels would vanish against the dark CARTO style.
+            _label_color = [243,241,233,230] if _dark else [0,0,0,230]
             if "Heatmap" in map_mode:
                 pts = []
                 for _, r in map_df.iterrows():
@@ -1039,7 +1116,7 @@ if is_company:
                 labels = pdk.Layer("TextLayer", data=map_df,
                     get_position=["LONGITUDE","LATITUDE"],
                     get_text="STATIONNAME", get_size=12,
-                    get_color=[0,0,0,230], get_pixel_offset=[0,-24], billboard=True)
+                    get_color=_label_color, get_pixel_offset=[0,-24], billboard=True)
                 layers  = [layer, labels]
                 tooltip = {"html":"""<div style='background:#000000;padding:10px 14px;
                   border-radius:6px;color:#FFF4EC;font-size:12px;min-width:180px'>
@@ -1048,10 +1125,11 @@ if is_company:
                   Sessions: <b>{sessions}</b><br>Revenue: <b>₱{revenue}</b><br>
                   Error rate: <b>{error_rate}%</b></div>"""}
 
-            # Free CARTO basemap — no Mapbox token required, unlike mapbox:// styles
+            # Free CARTO basemap — no Mapbox token required, unlike mapbox:// styles.
+            # Style flips light/dark with the page theme.
             deck = pdk.Deck(
                 layers=layers, initial_view_state=view_state,
-                map_provider="carto", map_style="light",
+                map_provider="carto", map_style=MAP_STYLE,
                 tooltip=tooltip,
             )
             st.pydeck_chart(deck, use_container_width=True)
@@ -1067,18 +1145,18 @@ if is_company:
             st.markdown(f"**Utilization by Station vs {target_util}% target**{title_suffix}")
             for _, r in map_df.sort_values("util_pct", ascending=False).head(10).iterrows():
                 u = r["util_pct"]; g = u - target_util
-                bc = "#BEFF6C" if u>=target_util else ("#A8710A" if u>=target_util*0.7 else "#C1443E")
-                gc = "#4F7A1E" if g>=0 else "#C1443E"
+                bc = ACCENT if u>=target_util else (WARN if u>=target_util*0.7 else DN)
+                gc = UP if g>=0 else DN
                 st.markdown(
                     f"<div style='margin-bottom:9px'>"
                     f"<div style='display:flex;justify-content:space-between;font-size:11px;"
-                    f"color:#000000;margin-bottom:2px'>"
+                    f"color:{TEXT};margin-bottom:2px'>"
                     f"<b>{r['STATIONNAME'][:30]}</b>"
                     f"<span style='color:{gc}'>{'▲' if g>=0 else '▼'}{abs(g):.1f}pp</span></div>"
-                    f"<div style='background:#EAE0D0;border-radius:2px;height:12px;overflow:hidden'>"
+                    f"<div style='background:{BORDER};border-radius:2px;height:12px;overflow:hidden'>"
                     f"<div style='width:{min(u,100)}%;height:100%;background:{bc};border-radius:2px'></div></div>"
                     f"<div style='display:flex;justify-content:space-between;font-size:9px;"
-                    f"color:#5C574D;margin-top:1px'>"
+                    f"color:{MUTED};margin-top:1px'>"
                     f"<span>{r['energy_kwh']:,.0f} kWh</span><b>{u}%</b></div></div>",
                     unsafe_allow_html=True)
 
@@ -1096,7 +1174,7 @@ with t1:
     # elsewhere) so this reads as "typical sessions at this hour," not a
     # monthly total that's bigger just because the month is longer.
     h["Sessions"] = (h["Sessions"] / days).round(1)
-    if len(h): st.bar_chart(h.set_index("HOUR"), color="#BEFF6C", height=200)
+    if len(h): st.bar_chart(h.set_index("HOUR"), color=ACCENT, height=200)
 with t2:
     st.markdown("**Avg Sessions by Day of Week**")
     _dow_order = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
@@ -1115,7 +1193,7 @@ with t2:
     _dow_occurrences = pd.Series(_month_dates.strftime("%a")).value_counts()
     dow_ct["Occurrences"] = dow_ct["DOW"].astype(str).map(_dow_occurrences).fillna(1)
     dow_ct["Sessions"] = (dow_ct["Sessions"] / dow_ct["Occurrences"]).round(1)
-    if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW")[["Sessions"]], color="#BEFF6C", height=200)
+    if len(dow_ct): st.bar_chart(dow_ct.set_index("DOW")[["Sessions"]], color=ACCENT, height=200)
 
 st.markdown("<div class='row-hdr'>Charging Preferences</div>", unsafe_allow_html=True)
 st.caption("Equipment and vehicle mix.")
@@ -1132,7 +1210,7 @@ _df_psm["POWER_SUPPLY_MODE"] = _df_psm["CHARGER_ID"].map(_charger_type_map)
 # smaller, single-station pool).
 _filtered_user_ids = set(df["USERID"].dropna().astype(float).unique())
 ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
- 
+
 # Plug Type is only meaningful where 2+ plug types are actually installed
 # at the selected station(s) — with only one plug type on site, "which
 # plug do our customers have" is circular (only compatible customers can
@@ -1146,7 +1224,7 @@ with p1:
     psm_ct = _df_psm.groupby("POWER_SUPPLY_MODE").size().reset_index(name="Sessions")
     psm_ct = psm_ct[psm_ct["POWER_SUPPLY_MODE"].notna()]
     if len(psm_ct):
-        st.bar_chart(psm_ct.set_index("POWER_SUPPLY_MODE"), color="#BEFF6C", height=200)
+        st.bar_chart(psm_ct.set_index("POWER_SUPPLY_MODE"), color=ACCENT, height=200)
         _psm_dur = _df_psm.groupby("POWER_SUPPLY_MODE")["DURATION_MIN"].mean()
         _dur_bits = [f"{k}: {v:.0f} min avg" for k, v in _psm_dur.items() if pd.notna(v)]
         if _dur_bits:
@@ -1163,7 +1241,7 @@ with p2:
     elif len(ud_scoped) and "PLUG_TYPE" in ud_scoped.columns:
         plugs = ud_scoped["PLUG_TYPE"].value_counts().reset_index()
         plugs.columns = ["Plug Type","Users"]
-        st.bar_chart(plugs.set_index("Plug Type"), color="#BEFF6C", height=200)
+        st.bar_chart(plugs.set_index("Plug Type"), color=ACCENT, height=200)
         st.caption("Demand split among your installed chargers to know what your customers actually have.")
     else:
         st.info("No users match the current filter selection.")
@@ -1172,7 +1250,7 @@ with p3:
     if len(ud_scoped) and "CARBRAND" in ud_scoped.columns:
         brands = ud_scoped["CARBRAND"].value_counts().head(10).reset_index()
         brands.columns = ["Brand","Users"]
-        st.bar_chart(brands.set_index("Brand"), color="#BEFF6C", height=200)
+        st.bar_chart(brands.set_index("Brand"), color=ACCENT, height=200)
     else:
         st.info("No users match the current filter selection.")
 
@@ -1228,8 +1306,8 @@ _n_excluded = len(_df_psm[_df_psm["DURATION_MIN"].notna()]) - len(_scope)
 
 if _n_anom > 0:
     st.markdown(
-        f"<div style='background:#FEF3DC;border-left:3px solid #A8710A;border-radius:4px;"
-        f"padding:8px 12px;margin-top:4px;font-size:11px;color:#000'>"
+        f"<div style='background:{PANEL_ALT};border-left:3px solid {WARN};border-radius:4px;"
+        f"padding:8px 12px;margin-top:4px;font-size:11px;color:{TEXT}'>"
         f"⚠️ <b>{_n_anom} anomal{'y' if _n_anom==1 else 'ies'} in current selection "
         f"(rate-based, not duration-based):</b> "
         f"{len(_dc_slow)} DC session(s) delivered energy slower than a typical AC session "
@@ -1276,20 +1354,20 @@ if len(map_df):
     _t70 = round(target_util*0.7, 1)
     _t40 = round(target_util*0.4, 1)
     st.markdown(f"""
-    <div style='background:#fff;border-radius:6px;padding:10px 14px;
-                border:1px solid #EAE0D0;margin-top:6px;font-size:10px;color:#5C574D'>
-      <b style='color:#000'>Action legend</b> — thresholds scale with your current
+    <div style='background:{PANEL};border-radius:6px;padding:10px 14px;
+                border:1px solid {BORDER};margin-top:6px;font-size:10px;color:{MUTED}'>
+      <b style='color:{TEXT}'>Action legend</b> — thresholds scale with your current
       {target_util}% target:
-      &nbsp; <span style='color:#4F7A1E;font-weight:600'>✅ Expand</span> ≥ {target_util}%
-      &nbsp;·&nbsp; <span style='color:#A8710A;font-weight:600'>🟡 Monitor</span> ≥ {_t70}%
-      &nbsp;·&nbsp; <span style='color:#A8710A;font-weight:600'>⚠️ Optimize</span> ≥ {_t40}%
-      &nbsp;·&nbsp; <span style='color:#C1443E;font-weight:600'>🔴 Review</span> &lt; {_t40}%
+      &nbsp; <span style='color:{UP};font-weight:600'>✅ Expand</span> ≥ {target_util}%
+      &nbsp;·&nbsp; <span style='color:{WARN};font-weight:600'>🟡 Monitor</span> ≥ {_t70}%
+      &nbsp;·&nbsp; <span style='color:{WARN};font-weight:600'>⚠️ Optimize</span> ≥ {_t40}%
+      &nbsp;·&nbsp; <span style='color:{DN};font-weight:600'>🔴 Review</span> &lt; {_t40}%
     </div>
     """, unsafe_allow_html=True)
 
 # ── PER-CHARGER ERROR RATE RANKING ───────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>⚠️ Charger Error Rate Ranking</div>", unsafe_allow_html=True)
- 
+
 _err_scope = df_all[df_all["STATIONNAME"].isin(sel_stations)]
 if len(_err_scope) and "CHARGER_ID" in _err_scope.columns:
     _cp_err = _err_scope.groupby("CHARGER_ID").agg(
@@ -1299,19 +1377,19 @@ if len(_err_scope) and "CHARGER_ID" in _err_scope.columns:
     _cp_err["Error Rate %"] = (_cp_err["Errors"] / _cp_err["Sessions"] * 100).round(1)
     _cp_err = _cp_err[_cp_err["Sessions"] >= 3]  # drop chargers with too few sessions to be meaningful
     _cp_err = _cp_err.sort_values("Error Rate %", ascending=False).head(10)
- 
+
     if len(_cp_err) == 0:
         st.info("No chargers in the current selection have enough sessions (≥3) this period to rank.")
     else:
         st.caption("Top 10 chargers by error rate this period (min. 3 sessions)")
         for _, r in _cp_err.iterrows():
             rate = r["Error Rate %"]
-            bc = "#C1443E" if rate > 10 else ("#A8710A" if rate > 5 else "#BEFF6C")
+            bc = DN if rate > 10 else (WARN if rate > 5 else ACCENT)
             st.markdown(
                 f"<div style='margin-bottom:7px'>"
-                f"<div style='display:flex;justify-content:space-between;font-size:11px;color:#000'>"
+                f"<div style='display:flex;justify-content:space-between;font-size:11px;color:{TEXT}'>"
                 f"<b>{r['CHARGER_ID']}</b><span>{rate:.1f}% ({int(r['Errors'])}/{int(r['Sessions'])})</span></div>"
-                f"<div style='background:#EAE0D0;border-radius:2px;height:8px;overflow:hidden'>"
+                f"<div style='background:{BORDER};border-radius:2px;height:8px;overflow:hidden'>"
                 f"<div style='width:{min(rate,100)}%;height:100%;background:{bc};border-radius:2px'></div></div>"
                 f"</div>", unsafe_allow_html=True)
 else:
@@ -1376,26 +1454,26 @@ if not is_company:
         pc1, pc2 = st.columns([2,1])
         with pc1:
             st.markdown(f"""
-            <div style='background:#fff;border-radius:8px;padding:16px 20px;
-                        border-left:4px solid #000;box-shadow:0 1px 6px rgba(0,0,0,.07)'>
-              <div style='font-size:11px;color:#5C574D'>Jan–Jun 2026 Revenue (from transactions)</div>
-              <div style='font-size:15px;font-weight:700;color:#000'>₱{_jj_revenue:,.0f}</div>
+            <div style='background:{PANEL};border-radius:8px;padding:16px 20px;
+                        border-left:4px solid {TEXT};box-shadow:0 1px 6px {SHADOW}'>
+              <div style='font-size:11px;color:{MUTED}'>Jan–Jun 2026 Revenue (from transactions)</div>
+              <div style='font-size:15px;font-weight:700;color:{TEXT}'>₱{_jj_revenue:,.0f}</div>
               <div style='display:flex;gap:24px;margin-top:8px'>
-                <div><div style='font-size:10px;color:#5C574D'>− Electricity Cost</div>
-                     <div style='font-size:13px;color:#C1443E;font-weight:600'>₱{_elec:,.0f}</div></div>
-                <div><div style='font-size:10px;color:#5C574D'>− Rent / Share</div>
-                     <div style='font-size:13px;color:#C1443E;font-weight:600'>₱{_rent:,.0f}</div></div>
-                <div><div style='font-size:10px;color:#5C574D'>= Contribution</div>
-                     <div style='font-size:13px;color:#4F7A1E;font-weight:700'>₱{_contribution:,.0f}</div></div>
+                <div><div style='font-size:10px;color:{MUTED}'>− Electricity Cost</div>
+                     <div style='font-size:13px;color:{DN};font-weight:600'>₱{_elec:,.0f}</div></div>
+                <div><div style='font-size:10px;color:{MUTED}'>− Rent / Share</div>
+                     <div style='font-size:13px;color:{DN};font-weight:600'>₱{_rent:,.0f}</div></div>
+                <div><div style='font-size:10px;color:{MUTED}'>= Contribution</div>
+                     <div style='font-size:13px;color:{UP};font-weight:700'>₱{_contribution:,.0f}</div></div>
               </div>
-              <hr style='margin:10px 0;border-color:#EAE0D0'>
-              <div style='font-size:10px;color:#5C574D'>Total CapEx (Financials workbook)</div>
-              <div style='font-size:13px;color:#000;font-weight:600'>₱{_capex:,.0f}</div>
-              <div style='background:#EAE0D0;border-radius:4px;height:14px;margin-top:8px;overflow:hidden'>
+              <hr style='margin:10px 0;border-color:{BORDER}'>
+              <div style='font-size:10px;color:{MUTED}'>Total CapEx (Financials workbook)</div>
+              <div style='font-size:13px;color:{TEXT};font-weight:600'>₱{_capex:,.0f}</div>
+              <div style='background:{BORDER};border-radius:4px;height:14px;margin-top:8px;overflow:hidden'>
                 <div style='width:{min(max(_payback_pct,0),100)}%;height:100%;
-                            background:{"#BEFF6C" if _payback_pct>=0 else "#C1443E"};border-radius:4px'></div>
+                            background:{ACCENT if _payback_pct>=0 else DN};border-radius:4px'></div>
               </div>
-              <div style='font-size:10px;color:#5C574D;margin-top:4px'>
+              <div style='font-size:10px;color:{MUTED};margin-top:4px'>
                 {_payback_pct:.1f}% recovered
                 {f"· ~{_months_left:.0f} months remaining at current rate" if _months_left and _months_left>0 else ""}
               </div>
@@ -1434,31 +1512,31 @@ if not is_company:
         cols = st.columns(min(len(site_cps),5))
         for i,(_, row) in enumerate(site_cps.iterrows()):
             if i>=5: break
-            sc = "#4F7A1E" if row.get("NETWORK_STATUS")=="Online" else "#C1443E"
+            sc = UP if row.get("NETWORK_STATUS")=="Online" else DN
             cs = row.get("CONNECTOR_STATUS","—")
-            cs_col = "#4F7A1E" if cs=="Available" else ("#000000" if cs=="Charging" else "#C1443E")
+            cs_col = UP if cs=="Available" else (TEXT if cs=="Charging" else DN)
             cp_sess = df[df["CHARGER_ID"]==row["CHARGER_ID"]]
             cp_kwh  = cp_sess["ENERGY_KWH"].sum()
             cp_avail = row.get("CAPACITY_KW",0) * station_hours.get(sel_stations[0], op_hours_fallback)  * days
             cp_util  = round(cp_kwh/cp_avail*100,1) if cp_avail>0 else 0
             ports_label = f" · {int(row['PORTS'])} ports" if row.get("PORTS",1) > 1 else ""
             cols[i].markdown(
-                f"<div style='background:white;border-radius:6px;padding:11px;"
-                f"border-top:3px solid {sc};box-shadow:0 1px 4px rgba(0,0,0,.07)'>"
-                f"<div style='font-size:11px;font-weight:600;color:#000000'>{row['CHARGER_ID']}</div>"
-                f"<div style='font-size:9px;color:#5C574D'>{row.get('CHARGER_TYPE','—')} · {row.get('CAPACITY_KW','—')}kW{ports_label}</div>"
-                f"<div style='font-size:9px;color:#5C574D'>{row.get('PLUG_TYPE','—')}</div>"
+                f"<div style='background:{PANEL};border-radius:6px;padding:11px;"
+                f"border-top:3px solid {sc};box-shadow:0 1px 4px {SHADOW}'>"
+                f"<div style='font-size:11px;font-weight:600;color:{TEXT}'>{row['CHARGER_ID']}</div>"
+                f"<div style='font-size:9px;color:{MUTED}'>{row.get('CHARGER_TYPE','—')} · {row.get('CAPACITY_KW','—')}kW{ports_label}</div>"
+                f"<div style='font-size:9px;color:{MUTED}'>{row.get('PLUG_TYPE','—')}</div>"
                 f"<div style='font-size:9px;color:{cs_col};margin-top:3px'>● {cs}</div>"
-                f"<hr style='margin:5px 0;border-color:#EAE0D0'>"
-                f"<div style='font-size:9px;color:#5C574D'>Util: <b style='color:#000000'>{cp_util}%</b></div>"
-                f"<div style='font-size:9px;color:#5C574D'>kWh: <b style='color:#000000'>{cp_kwh:,.0f}</b></div>"
-                f"<div style='font-size:9px;color:#5C574D'>Sessions: <b style='color:#000000'>{len(cp_sess)}</b></div>"
+                f"<hr style='margin:5px 0;border-color:{BORDER}'>"
+                f"<div style='font-size:9px;color:{MUTED}'>Util: <b style='color:{TEXT}'>{cp_util}%</b></div>"
+                f"<div style='font-size:9px;color:{MUTED}'>kWh: <b style='color:{TEXT}'>{cp_kwh:,.0f}</b></div>"
+                f"<div style='font-size:9px;color:{MUTED}'>Sessions: <b style='color:{TEXT}'>{len(cp_sess)}</b></div>"
                 f"</div>", unsafe_allow_html=True)
 
 # ── FOOTER ───────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;font-size:10px;color:#8A8377'>"
+    f"<div style='text-align:center;font-size:10px;color:{MUTED}'>"
     "Project ChargeIQ Analytics · AIM MAIDA Capstone · "
     "Built with Streamlit + PyDeck</div>",
     unsafe_allow_html=True)

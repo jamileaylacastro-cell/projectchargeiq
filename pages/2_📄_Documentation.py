@@ -1,5 +1,34 @@
 import streamlit as st
 
+# ── THEME ────────────────────────────────────────────────────────────────────
+# Matches dashboard.py / the Forecasting page so all three pages read as one
+# app rather than two branded pages plus one left on Streamlit's generic
+# default theme. See dashboard.py's THEME section for the full rationale.
+_dark = st.context.theme.type == "dark"
+_BLACK  = "#000000"
+_CREAM  = "#FFF4EC"
+_ACCENT = "#BEFF6C"
+_BG    = "#15140F" if _dark else "#FFF4EC"
+_PANEL = "#211F17" if _dark else "#FFFFFF"
+_BORDER = "#3A3628" if _dark else "#EAE0D0"
+_TEXT  = "#F3F1E9" if _dark else "#000000"
+
+st.markdown(f"""
+<style>
+.stApp{{background:{_BG}}}
+section[data-testid="stSidebar"]{{background:{_BLACK}}}
+section[data-testid="stSidebar"] *{{color:{_CREAM}!important}}
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3{{color:{_ACCENT}!important}}
+div[data-testid="stTabs"] button[aria-selected="true"]{{color:{_ACCENT}!important;border-bottom-color:{_ACCENT}!important}}
+div[data-testid="stMarkdownContainer"] table{{border-color:{_BORDER}!important}}
+div[data-testid="stMarkdownContainer"] th, div[data-testid="stMarkdownContainer"] td{{
+  border-color:{_BORDER}!important; background:{_PANEL}!important; color:{_TEXT}!important;
+}}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown("## 📄 Project ChargeIQ — Documentation")
 st.caption(
     "Reference for how the Dashboard and Forecasting Model pages work — what each metric "
