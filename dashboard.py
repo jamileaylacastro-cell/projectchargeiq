@@ -49,6 +49,13 @@ st.markdown(f"""
 .stApp{{background:{BG}}}
 [data-testid="stAppViewContainer"] > .main {{ padding-top: 0 !important; }}
 div.block-container {{ padding-top: 0.5rem !important; }}
+/* Streamlit's own header bar is absolutely positioned with a high z-index
+   and an opaque background — with the top padding above squeezed down,
+   content (like the page title) renders underneath that opaque bar and
+   gets visually covered by it. Making the header transparent removes the
+   block without affecting its menu/deploy buttons, which are styled
+   independently and stay visible and clickable. */
+[data-testid="stHeader"]{{ background:transparent!important; }}
 section[data-testid="stSidebar"]{{background:{BLACK}}}
 section[data-testid="stSidebar"] *{{color:{CREAM}!important}}
 section[data-testid="stSidebar"] h1,
