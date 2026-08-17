@@ -198,6 +198,17 @@ with tab_forecast:
         "export shifts the header position."
     )
 
+    st.markdown("### AC/DC segregation")
+    st.markdown(
+        "If the uploaded workbook has an `AC_DC` column and the selected station has "
+        "**both** AC and DC sessions, a **Charger type** selector appears in the sidebar "
+        "and the model is fit on just that segment (one series for AC, one for DC) instead "
+        "of blending the two together — AC and DC sessions have different demand shapes "
+        "(duration, kWh per session), and averaging them muddies both patterns. A station "
+        "with only one connector type, or a workbook with no `AC_DC` column at all, "
+        "forecasts as a single combined series exactly as before."
+    )
+
     st.markdown("### Cleaning rules (`utils/cleaning.py`, editable in the sidebar)")
     st.markdown(
         """
@@ -244,6 +255,19 @@ with tab_forecast:
         "that's usually fine but occasionally badly wrong)\n"
         "- **MAE** is the average absolute miss — easier to explain (\"off by about X "
         "kWh/day on average\")"
+    )
+
+    st.markdown("### Seasonal naive baseline")
+    st.markdown(
+        "Every backtest and every forward forecast also computes a **seasonal naive "
+        "baseline** — it just repeats the last observed week forward (no fitting at all) "
+        "and is scored the same way as the real model. It's shown every time a forecast "
+        "runs (not opt-in) as a sanity check: a model that can't beat this trivial repeat "
+        "isn't adding value over doing nothing. In the Accuracy Check tab it appears as "
+        "two extra metric boxes plus a dotted reference line on the chart, with a caption "
+        "stating whether the chosen model is beating or underperforming it on RMSE; in the "
+        "Forecast tab it's a dotted line on the forward chart and an extra column in the "
+        "downloadable CSV."
     )
 
     st.markdown("### Results — ETS Additive vs. SARIMA")

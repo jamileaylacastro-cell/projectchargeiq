@@ -14,10 +14,19 @@ def clean_and_aggregate(
     min_duration_minutes: int = 10,
     max_energy_kwh: float = 100,
     min_year: int = 2020,
+    ac_dc: str | None = None,
 ):
     """Filter transaction-level rows for one station and return (df_ts, daily_series).
-    Returns (None, None) if nothing survives the filters."""
+    Returns (None, None) if nothing survives the filters.
+
+    ac_dc: if given and an AC_DC column is present, scopes to just that
+    connector type (e.g. "AC" or "DC") — used to segregate the forecast
+    for stations that have both, instead of blending their demand
+    patterns into one series.
+    """
     station_df = source_df[source_df["STATIONNAME"] == station_name].copy()
+    if ac_dc is not None and "AC_DC" in station_df.columns:
+        station_df = station_df[station_df["AC_DC"] == ac_dc]
     if station_df.empty:
         return None, None
 

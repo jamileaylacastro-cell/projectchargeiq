@@ -233,6 +233,24 @@ target_column = "ENERGY_KWH"  # kWh is the only supported target (Amount was dro
 stations = sorted(raw["STATIONNAME"].dropna().unique())
 selected_station = st.sidebar.selectbox("Charging station", stations)
 
+# Stations with BOTH AC and DC chargers get segregated into two separate
+# forecasts (one per connector type) rather than one blended series — AC
+# and DC sessions have very different demand shapes (duration, kWh per
+# session), and averaging them together muddies both patterns. Stations
+# with only one type (or no AC_DC column at all) forecast as before.
+_station_rows = raw[raw["STATIONNAME"] == selected_station]
+_ac_dc_values = sorted(_station_rows["AC_DC"].dropna().unique()) if "AC_DC" in raw.columns else []
+_both_ac_dc = {"AC", "DC"}.issubset(set(_ac_dc_values))
+if _both_ac_dc:
+    ac_dc_choice = st.sidebar.radio(
+        "Charger type", ["AC", "DC"],
+        help="This station has both AC and DC chargers, which have very different "
+             "demand patterns — the forecast is segregated by type instead of "
+             "blending them into one series.",
+    )
+else:
+    ac_dc_choice = _ac_dc_values[0] if _ac_dc_values else None
+
 model_choice = st.sidebar.radio("Forecasting model", ["ETS Additive", "SARIMA"])
 
 st.sidebar.markdown("---")
@@ -252,17 +270,25 @@ forecast_horizon = st.sidebar.slider("Forecast horizon (days ahead)", 7, 90, 30)
 df_ts, daily_series = clean_and_aggregate(
     raw, selected_station, target_col=target_column,
     min_duration_minutes=min_duration, max_energy_kwh=max_energy, min_year=min_year,
+    ac_dc=ac_dc_choice,
 )
 
+_title_suffix = f" — {ac_dc_choice} chargers" if _both_ac_dc else ""
 st.markdown("<div class='cq-header'>EV CHARGING · MODEL SELECTOR</div>", unsafe_allow_html=True)
-st.markdown(f"<div class='cq-title'>{selected_station}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='cq-title'>{selected_station}{_title_suffix}</div>", unsafe_allow_html=True)
+if _both_ac_dc:
+    st.caption(
+        f"📋 This station has both AC and DC chargers — showing the **{ac_dc_choice}-only** "
+        f"forecast. Switch **Charger type** in the sidebar to see the other segment."
+    )
 
 if daily_series is None or daily_series.dropna().shape[0] < backtest_days + 30:
     n = 0 if daily_series is None else daily_series.dropna().shape[0]
     st.warning(
-        f"Not enough clean data for this station after filtering ({n} days). "
+        f"Not enough clean data for this station{_title_suffix} after filtering ({n} days). "
         f"Need at least {backtest_days + 30} days for a {backtest_days}-day backtest. "
-        "Try a different station, or loosen the cleaning rules in the sidebar."
+        "Try a different station" + (" or charger type" if _both_ac_dc else "") +
+        ", or loosen the cleaning rules in the sidebar."
     )
     st.stop()
 
@@ -321,11 +347,27 @@ with tab_backtest:
 
     result = st.session_state.get("backtest_result")
     if result is not None:
-        m1, m2 = st.columns(2)
+        m1, m2, m3, m4 = st.columns(4)
         m1.markdown(f"<div class='cq-metric-box'><div class='cq-metric-label'>RMSE</div>"
                     f"<div class='cq-metric-value'>{result['rmse']:.2f}</div></div>", unsafe_allow_html=True)
         m2.markdown(f"<div class='cq-metric-box'><div class='cq-metric-label'>MAE</div>"
                     f"<div class='cq-metric-value'>{result['mae']:.2f}</div></div>", unsafe_allow_html=True)
+        m3.markdown(f"<div class='cq-metric-box' style='border-left-color:{MUTED}'>"
+                    f"<div class='cq-metric-label'>Baseline RMSE</div>"
+                    f"<div class='cq-metric-value'>{result['baseline_rmse']:.2f}</div></div>", unsafe_allow_html=True)
+        m4.markdown(f"<div class='cq-metric-box' style='border-left-color:{MUTED}'>"
+                    f"<div class='cq-metric-label'>Baseline MAE</div>"
+                    f"<div class='cq-metric-value'>{result['baseline_mae']:.2f}</div></div>", unsafe_allow_html=True)
+
+        _b_rmse = result["baseline_rmse"]
+        if _b_rmse:
+            _improvement = (_b_rmse - result["rmse"]) / _b_rmse * 100
+            _verdict = "beating" if _improvement > 0 else "underperforming"
+            st.caption(
+                f"📊 **Baseline** = seasonal naive (repeats the last observed week forward, no fitting "
+                f"involved) — the bar {model_choice} needs to clear for the fit to be worth it. "
+                f"{model_choice} is **{_verdict}** the baseline by {abs(_improvement):.1f}% on RMSE."
+            )
 
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=result["train"].index, y=result["train"], mode="lines",
@@ -340,6 +382,9 @@ with tab_backtest:
         ))
         fig2.add_trace(go.Scatter(x=result["point"].index, y=result["point"], mode="lines",
                                    line=dict(color=ACCENT, width=2, dash="dash"), name=f"{model_choice} forecast"))
+        fig2.add_trace(go.Scatter(x=result["baseline_point"].index, y=result["baseline_point"],
+                                   mode="lines", line=dict(color=MUTED, width=1.5, dash="dot"),
+                                   name="Seasonal naive baseline"))
         fig2.update_layout(title=f"{model_choice} backtest — last {backtest_days} days")
         st.plotly_chart(plotly_base_layout(fig2), use_container_width=True)
     else:
@@ -451,17 +496,27 @@ with tab_forecast:
         fig3.add_trace(go.Scatter(x=fc["point"].index, y=fc["point"], mode="lines+markers",
                                    line=dict(color=ACCENT, width=3), marker=dict(size=4),
                                    name=f"{model_choice} forecast (+{forecast_horizon}d)"))
-        fig3.update_layout(title=f"{selected_station} — {forecast_horizon}-day forecast ({model_choice})")
+        fig3.add_trace(go.Scatter(x=fc["baseline_point"].index, y=fc["baseline_point"],
+                                   mode="lines", line=dict(color=MUTED, width=1.5, dash="dot"),
+                                   name="Seasonal naive baseline"))
+        fig3.update_layout(title=f"{selected_station}{_title_suffix} — {forecast_horizon}-day forecast ({model_choice})")
         st.plotly_chart(plotly_base_layout(fig3), use_container_width=True)
+        st.caption(
+            "📊 The dotted **seasonal naive baseline** just repeats the last observed week forward, "
+            "with no fitting — a quick sanity check for whether the model's shape looks meaningfully "
+            "different from a trivial repeat."
+        )
 
         forecast_table = pd.DataFrame({
             "date": fc["point"].index, f"forecast_{target_column}": fc["point"].values,
             "lower_80": fc["lower"].values, "upper_80": fc["upper"].values,
+            f"seasonal_naive_baseline_{target_column}": fc["baseline_point"].values,
         })
         st.dataframe(forecast_table, use_container_width=True, height=250)
+        _segment_tag = f"_{ac_dc_choice}" if _both_ac_dc else ""
         st.download_button(
             "Download forecast CSV", forecast_table.to_csv(index=False).encode("utf-8"),
-            file_name=f"forecast_{selected_station}_{model_choice.replace(' ', '')}_{forecast_horizon}d.csv",
+            file_name=f"forecast_{selected_station}{_segment_tag}_{model_choice.replace(' ', '')}_{forecast_horizon}d.csv",
         )
     else:
         st.info("Click **Generate forecast** to project future demand for this station.")

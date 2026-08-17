@@ -57,6 +57,19 @@ MODEL_RUNNERS = {
 }
 
 
+def run_seasonal_naive(series: pd.Series, horizon: int, target_index: pd.DatetimeIndex,
+                        season_length: int = SEASON_LENGTH) -> pd.Series:
+    """Seasonal naive baseline: repeats the last observed `season_length` days
+    (the most recent full week, by default) forward to cover `horizon`,
+    cycling as needed. This is the standard "did the model actually add
+    value" reference — a model that can't beat this trivial baseline isn't
+    worth using over just repeating last week's pattern."""
+    last_season = series.iloc[-season_length:].to_numpy()
+    reps = int(np.ceil(horizon / season_length))
+    values = np.tile(last_season, reps)[:horizon]
+    return pd.Series(values, index=target_index)
+
+
 def compute_metrics(y_true: pd.Series, y_pred: pd.Series):
     aligned = pd.concat([y_true.rename("actual"), y_pred.rename("pred")], axis=1).dropna()
     if aligned.empty:
@@ -80,10 +93,18 @@ def run_backtest(daily_series: pd.Series, model_name: str, test_days: int = 30):
     point, lower, upper = runner(train, len(test), test.index)
     rmse, mae = compute_metrics(test, point)
 
+    # Seasonal naive baseline, scored the same way, on the same split —
+    # shown alongside every backtest so the chosen model's accuracy has a
+    # reference point, not just an isolated number.
+    baseline_point = run_seasonal_naive(train, len(test), test.index)
+    baseline_rmse, baseline_mae = compute_metrics(test, baseline_point)
+
     return {
         "train": train, "test": test,
         "point": point, "lower": lower, "upper": upper,
         "rmse": rmse, "mae": mae, "model": model_name,
+        "baseline_point": baseline_point,
+        "baseline_rmse": baseline_rmse, "baseline_mae": baseline_mae,
     }
 
 
@@ -95,4 +116,8 @@ def run_forward_forecast(daily_series: pd.Series, model_name: str, horizon: int)
     runner = MODEL_RUNNERS[model_name]
     point, lower, upper = runner(daily_series, horizon, future_index)
 
-    return {"point": point, "lower": lower, "upper": upper}
+    # Seasonal naive baseline, projected the same distance forward — shown
+    # alongside every forecast for the same reason as in the backtest.
+    baseline_point = run_seasonal_naive(daily_series, horizon, future_index)
+
+    return {"point": point, "lower": lower, "upper": upper, "baseline_point": baseline_point}

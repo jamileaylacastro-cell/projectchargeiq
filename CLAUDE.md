@@ -60,9 +60,15 @@ configurable in the sidebar). `Duration` is no longer a source column — it's d
 
 - `utils/cleaning.py` — `clean_and_aggregate()`: filters (min session duration, max kWh
   outlier cap, min valid year, drops bad rows), then resamples to a daily series per
-  station. Same rules as the analysis notebook (`ForecastingModel_CD_v2.ipynb`).
+  station. Same rules as the analysis notebook (`ForecastingModel_CD_v2.ipynb`). Takes an
+  optional `ac_dc` param — if the source has an `AC_DC` column and the station has both AC
+  and DC sessions, the Forecasting page shows a "Charger type" sidebar selector and fits
+  the model on just that segment instead of blending AC+DC demand into one series.
 - `utils/models.py` — ETS Additive (Holt-Winters) and SARIMA (`pmdarima.auto_arima`), each
   returning point forecast + 80% interval (P10/P90). Backtest = last-N-days holdout.
+  `run_seasonal_naive()` (repeats the last observed week forward, no fitting) is computed
+  alongside every backtest and forward forecast as a baseline reference — always shown, not
+  opt-in, in both the Accuracy Check and Forecast tabs.
 - `utils/summary.py` — Station Profile panel, computed from the same cleaned data the
   model trains on (not raw transactions), so profile numbers stay consistent with whatever
   cleaning thresholds are set. Three optional columns feed the panel if present:
