@@ -12,6 +12,32 @@ from utils.diagnostics import compute_residuals, acf_pacf_data, qq_plot_data, lj
 # Page config is set once by the router (chargeiq_app.py) before st.navigation
 # runs this page — calling it again here would raise a StreamlitAPIException.
 
+# =============================================================================
+# HOW-TO-READ-THIS-FORECAST GUIDE — edit freely.
+# Shown below the forecast chart in the Forecast tab. Each string in the list
+# becomes one bullet point, in order. Add, remove, or reword entries as
+# needed — no other code needs to change. Markdown works (**bold**, *italic*,
+# `code`), and each string can span multiple lines/sentences.
+# =============================================================================
+FORECAST_GUIDE_NOTES = [
+    "The solid line is the model's **point forecast** — its single best guess for daily "
+    "kWh on each future date, not a guarantee.",
+    "The shaded band is the **80% interval** (P10–P90): the model expects the actual value "
+    "to land inside that range about 8 times out of 10. A wide band means more uncertainty, "
+    "not a wider *likely* outcome.",
+    "The dotted **seasonal naive baseline** just repeats last week's pattern forward, with "
+    "no fitting involved. If the model's forecast doesn't look meaningfully different from "
+    "it, treat the forecast with more caution — check the Accuracy Check tab's RMSE/MAE vs. "
+    "Baseline RMSE/MAE caption to see whether the model is actually beating it.",
+    "Confidence decays the further out you look — a forecast for tomorrow is more reliable "
+    "than one near the end of the horizon, since uncertainty compounds day over day.",
+    "This forecasts **kWh demand only**, not revenue — multiply by your rate per kWh "
+    "separately if you need a revenue estimate.",
+    "If this station has both AC and DC chargers, the forecast above covers only the "
+    "**Charger type** currently selected in the sidebar — switch it to see the other "
+    "segment, and add the two together for the station's total demand.",
+]
+
 # ---------------------------------------------------------------------------
 # Theme (aligned to the dashboard color palette; adapts to light/dark via
 # st.context.theme.type — see dashboard.py's THEME section for why this is
@@ -518,6 +544,14 @@ with tab_forecast:
             "Download forecast CSV", forecast_table.to_csv(index=False).encode("utf-8"),
             file_name=f"forecast_{selected_station}{_segment_tag}_{model_choice.replace(' ', '')}_{forecast_horizon}d.csv",
         )
+
+        # Guide content lives in FORECAST_GUIDE_NOTES near the top of this
+        # file — edit that list, not this loop, to change what's shown here.
+        st.markdown("---")
+        st.markdown("<div class='cq-section-label'>📖 How to read this forecast</div>",
+                    unsafe_allow_html=True)
+        for _note in FORECAST_GUIDE_NOTES:
+            st.markdown(f"- {_note}")
     else:
         st.info("Click **Generate forecast** to project future demand for this station.")
 
