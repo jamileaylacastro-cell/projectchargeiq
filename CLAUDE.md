@@ -48,6 +48,19 @@ are gitignored; the app gates on upload-or-bundled-file before rendering. `load_
 tries Excel first and falls back to CSV parsing for the transactions file (some exports
 come through as `.csv` content despite the `.xlsx` name).
 
+**Charger Type (AC/DC) filter**, top of the page, above both views — `st.pills` with AC
+and DC both selected by default. Charger type isn't a column on `tx` directly; it lives on
+the Charge Point Information workbook (`CHARGER_TYPE`, keyed by `CHARGER_ID`), so it's
+mapped onto `tx` right after `load_all()` returns (`tx["AC_DC"] = tx["CHARGER_ID"].map(...)`)
+and a filtered `cp_cap_ac` is built alongside the unfiltered `cp_cap`. Every
+session/connector-scoped computation downstream (KPIs, charts, Station Profile, Connector
+Detail, the map) should read from the masked `tx`/`cp_cap_ac`, not the raw `tx`/`cp_cap` —
+grep for `cp_cap_ac` and `_tx_ac_dc_mask` before adding a new metric so it respects the
+filter. Deliberately left unfiltered: the active-days-in-month count, the data-quality
+caption's raw connector count, the Anomaly Check (compares AC vs DC internally, would
+break if pre-split), and the Site Payback Tracker (CapEx isn't recorded per connector
+type in the Financials workbook).
+
 ## Forecasting page (`pages/1_🔮_Forecasting.py` + `utils/`)
 
 Ported from a standalone prototype (`Forecasting Model` project) into this repo as a

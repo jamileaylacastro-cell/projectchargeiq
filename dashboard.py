@@ -170,6 +170,16 @@ button[kind="primary"] *{{ color:{ACCENT_TEXT}!important; }}
 button[kind="secondary"]{{ border-color:{TEXT}!important; background:{PANEL}!important; }}
 button[kind="secondary"] *{{ color:{TEXT}!important; }}
 
+/* st.pills (Charger Type filter) — same Streamlit-default-red issue as
+   the radio pill and slider thumb above; its selected state needs the
+   same lime-accent override to match the brand instead. */
+[data-testid="stButtonGroup"] button[data-variant="pills"]{{
+  background:{PANEL}!important; border-color:{BORDER}!important; color:{TEXT}!important;
+}}
+[data-testid="stButtonGroup"] button[data-variant="pills"][data-selected="true"]{{
+  background:{ACCENT}!important; border-color:{ACCENT_TEXT}!important; color:{ACCENT_TEXT}!important;
+}}
+
 /* File uploader — panel bg, adaptive text/border */
 div[data-testid="stFileUploader"] section{{
   background:{PANEL}!important; border:1px dashed {TEXT}!important;
@@ -355,6 +365,14 @@ excl_b = file_bytes.get("transactions_excluded")
     payback_ref, cp_excluded_count, dur_excluded_count
 ) = load_all(tx_b, cp_b, sp_b, ud_b, wt_b, fin_b, excl_b)
 
+# ── CHARGER TYPE (AC/DC) MAPPING ────────────────────────────────────────────
+# Charge Point Information has CHARGER_TYPE (AC/DC) per connector; session
+# rows in tx only carry CHARGER_ID, so map it across. Built from the full,
+# unfiltered cp_cap so the mapping is always complete regardless of the
+# AC/DC display filter below.
+_charger_type_map = cp_cap.groupby("CHARGER_ID")["CHARGER_TYPE"].first()
+tx["AC_DC"] = tx["CHARGER_ID"].map(_charger_type_map)
+
 with st.sidebar:
     st.markdown("## Filters")
     view = st.radio("View", ["🏢  Company / Ops", "🏪  Host Partner Site"], horizontal=True)
@@ -431,6 +449,32 @@ with st.sidebar:
                 f"Source: {src_label}</small>",
                 unsafe_allow_html=True)
 
+# ── CHARGER TYPE FILTER — top of the dashboard ──────────────────────────────
+# Both selected (the default) shows everything, same as before this filter
+# existed. Deselecting one narrows every KPI, chart, map, and table below
+# to just that connector type — this is a real data filter, not scoped to
+# one section, so it lives up here rather than buried in one chart's code.
+st.markdown("<div class='sec-hdr'>⚡ Charger Type</div>", unsafe_allow_html=True)
+ac_dc_selection = st.pills(
+    "Show data for", ["AC", "DC"], selection_mode="multi", default=["AC", "DC"],
+    label_visibility="collapsed",
+    help="AC, DC, or both. Both selected (the default) shows all data — "
+         "deselect one to see only the other connector type.",
+)
+if not ac_dc_selection:
+    # Neither selected reads as "no filter" too, same as an empty Stations
+    # multiselect elsewhere in this app — an empty dashboard isn't useful.
+    ac_dc_selection = ["AC", "DC"]
+_ac_dc_filtered = set(ac_dc_selection) != {"AC", "DC"}
+
+if _ac_dc_filtered:
+    _tx_ac_dc_mask = tx["AC_DC"].isin(ac_dc_selection)
+    cp_cap_ac = cp_cap[cp_cap["CHARGER_TYPE"].isin(ac_dc_selection)]
+    st.caption(f"📋 Showing **{' + '.join(ac_dc_selection)}**-only data across the dashboard.")
+else:
+    _tx_ac_dc_mask = pd.Series(True, index=tx.index)
+    cp_cap_ac = cp_cap
+
 # ── PER-STATION OPERATING HOURS ─────────────────────────────────────────────
 # Real business hours from Station Profile, not one manual number applied
 # uniformly to every station — a mall at 10am-10pm and a 24-hr highway
@@ -474,12 +518,14 @@ df = tx[
     (tx["STATIONNAME"].isin(sel_stations)) &
     (tx["MONTH"] == sel_month) &
     (tx["CHARGE_TYPE"].isin(charge_types)) &
-    (~tx["ISERROR"].astype(bool))
+    (~tx["ISERROR"].astype(bool)) &
+    (_tx_ac_dc_mask)
 ].copy()
 
 df_all = tx[
     (tx["STATIONNAME"].isin(sel_stations)) &
-    (tx["MONTH"] == sel_month)
+    (tx["MONTH"] == sel_month) &
+    (_tx_ac_dc_mask)
 ].copy()
 
 prior_month = sel_month - 1
@@ -487,13 +533,16 @@ df_prior = tx[
     (tx["STATIONNAME"].isin(sel_stations)) &
     (tx["MONTH"] == prior_month) &
     (tx["CHARGE_TYPE"].isin(charge_types)) &
-    (~tx["ISERROR"].astype(bool))
+    (~tx["ISERROR"].astype(bool)) &
+    (_tx_ac_dc_mask)
 ].copy()
 
 # ── CORE METRICS ─────────────────────────────────────────────────────────────
 # cp_sel = all data-quality-valid connectors at the selected station(s),
-# regardless of online/offline (used for total counts + reliability KPIs)
-cp_sel = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations)]
+# regardless of online/offline (used for total counts + reliability KPIs).
+# Uses cp_cap_ac (AC/DC-filtered) so Reliability KPIs and capacity respect
+# the Charger Type filter too, not just session-level KPIs.
+cp_sel = cp_cap_ac[cp_cap_ac["STATIONNAME"].isin(sel_stations)]
 # Only ONLINE connectors contribute real, usable capacity for the period
 cp_sel_online = cp_sel[cp_sel["NETWORK_STATUS"] == "Online"]
 
@@ -606,7 +655,7 @@ if not is_company:
 
     # First / Last year of operation — derived from actual session history,
     # since Station Profile has no explicit launch/decommission date field
-    _station_sessions = tx[tx["STATIONNAME"] == _station]
+    _station_sessions = tx[(tx["STATIONNAME"] == _station) & _tx_ac_dc_mask]
     if len(_station_sessions):
         first_year = int(_station_sessions["STARTTIME"].dt.year.min())
         last_year  = int(_station_sessions["STARTTIME"].dt.year.max())
@@ -638,7 +687,7 @@ if not is_company:
     # Capacity shown is the AVERAGE across this station's charge points,
     # not the total network capacity (that's used separately for the
     # utilization denominator).
-    _station_cps = cp_cap[cp_cap["STATIONNAME"] == _station]
+    _station_cps = cp_cap_ac[cp_cap_ac["STATIONNAME"] == _station]
     n_charge_points = len(_station_cps)
     avg_capacity    = _station_cps["CAPACITY_KW"].mean() if len(_station_cps) else 0
 
@@ -782,7 +831,7 @@ if is_company and len(sel_stations) > 1:
     _lb_rows = []
     for s in sel_stations:
         s_df = df[df["STATIONNAME"] == s]
-        s_cp = cp_cap[cp_cap["STATIONNAME"] == s]
+        s_cp = cp_cap_ac[cp_cap_ac["STATIONNAME"] == s]
         s_cp_online = s_cp[s_cp["NETWORK_STATUS"] == "Online"]
         s_kwh = s_df["ENERGY_KWH"].sum()
         s_avail = s_cp_online["CAPACITY_KW"].sum() * station_hours.get(s, op_hours_fallback) * days
@@ -976,7 +1025,8 @@ st.markdown("<div class='sec-hdr'>📈 Utilization Trend</div>", unsafe_allow_ht
 _trend_base = tx[
     (tx["STATIONNAME"].isin(sel_stations)) &
     (tx["CHARGE_TYPE"].isin(charge_types)) &
-    (~tx["ISERROR"].astype(bool))
+    (~tx["ISERROR"].astype(bool)) &
+    (_tx_ac_dc_mask)
 ].copy()
 
 if len(_trend_base):
@@ -1051,7 +1101,7 @@ else:
 station_rows = []
 for sname in sel_stations:
     s_df  = df[df["STATIONNAME"] == sname]
-    s_cp  = cp_cap[cp_cap["STATIONNAME"] == sname]
+    s_cp  = cp_cap_ac[cp_cap_ac["STATIONNAME"] == sname]
     s_all = df_all[df_all["STATIONNAME"] == sname]
     s_kwh  = s_df["ENERGY_KWH"].sum()
     s_cap  = s_cp[s_cp["NETWORK_STATUS"]=="Online"]["CAPACITY_KW"].sum()
@@ -1223,7 +1273,7 @@ ud_scoped = ud[ud["USERID"].astype(float).isin(_filtered_user_ids)]
 # plug do our customers have" is circular (only compatible customers can
 # charge there at all). With 2+ types installed, the split among
 # compatible customers becomes a real signal for connector planning.
-_installed_plug_types = cp_cap[cp_cap["STATIONNAME"].isin(sel_stations)]["PLUG_TYPE"].nunique()
+_installed_plug_types = cp_cap_ac[cp_cap_ac["STATIONNAME"].isin(sel_stations)]["PLUG_TYPE"].nunique()
 
 p1, p2, p3 = st.columns(3)
 with p1:
@@ -1503,7 +1553,7 @@ if not is_company:
     # charger for display, summing capacity and listing all its plug types,
     # rather than showing one card per port (which would double-count
     # that charger's sessions across cards).
-    site_rows = cp_cap[cp_cap["STATIONNAME"]==sel_stations[0]]
+    site_rows = cp_cap_ac[cp_cap_ac["STATIONNAME"]==sel_stations[0]]
     if len(site_rows):
         site_cps = site_rows.groupby("CHARGER_ID").agg(
             CAPACITY_KW=("CAPACITY_KW","sum"),

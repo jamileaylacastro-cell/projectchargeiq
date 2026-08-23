@@ -102,6 +102,28 @@ with tab_dash:
         "viability)."
     )
 
+    st.markdown("### Charger Type filter (top of dashboard, both views)")
+    st.markdown(
+        "A pair of **AC** / **DC** pills above the page title, not in the sidebar — it "
+        "applies before either view renders. Both are selected by default, showing all "
+        "data unchanged; deselecting one scopes every session-derived number on the page "
+        "(KPIs, charts, Station Profile, Connector Detail, the map) to just that connector "
+        "type, with a caption confirming the active filter. Deselecting both falls back to "
+        "showing all data, same as an empty Stations multiselect elsewhere in the app. "
+        "Charger type comes from the Charge Point Information workbook's `CHARGER_TYPE` "
+        "column, mapped onto sessions by `CHARGER_ID` — a session whose charger isn't in "
+        "the Charge Point Information data has no charger type and is excluded whenever "
+        "the filter is active (only when both are selected does every session show, "
+        "including those without a resolvable charger type)."
+    )
+    st.caption(
+        "A few things deliberately ignore this filter since splitting them by AC/DC "
+        "wouldn't make sense: the active-days-in-month count, the raw connector-count "
+        "caption in the data-quality note, the Anomaly Check (which compares AC against "
+        "DC internally), and the Site Payback Tracker (CapEx isn't recorded separately per "
+        "connector type)."
+    )
+
     st.markdown("### Utilization formula")
     st.markdown(
         """
